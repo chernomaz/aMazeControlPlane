@@ -1,19 +1,27 @@
-# Agent policies — Sprint 3
+# Agent policies — Sprint 4
 #
 # A2A section: allowed_remote_agents
 # MCP section: allowed_mcp_servers + allowed_tools per server
+# limits:
+#   max_request_size_bytes  — body > this → deny(request-too-large)
+#   max_requests_per_minute — requests in window > this → deny(rate-limit-exceeded)
+#   rate_window_seconds     — sliding window length (default 60; set low for tests)
+#   per_tool_calls:         — per-tool call ceiling → deny(call-limit-exceeded)
+#     <tool_name>: <max>
 
 agents:
-  # ── A2A agents (Sprint 2) ────────────────────────────────────────────────
+  # ── A2A agents ───────────────────────────────────────────────────────────────
   agent-a:
     allowed_remote_agents:
       - agent-b
+    limits:
+      max_request_size_bytes: 256   # ST-4.2: bodies > 256 bytes denied
 
   agent-b:
     allowed_remote_agents:
       - agent-a
 
-  # ── MCP agent (Sprint 3) ─────────────────────────────────────────────────
+  # ── MCP agent — rate-limit test (ST-4.1) ─────────────────────────────────────
   agent-a-mcp:
     allowed_remote_agents: []
     allowed_mcp_servers:
@@ -21,3 +29,18 @@ agents:
     allowed_tools:
       mcp-server:
         - echo
+    limits:
+      max_requests_per_minute: 2
+      rate_window_seconds: 3        # short window so tests don't wait 60 s
+
+  # ── MCP agent — call-count test (ST-4.3) ─────────────────────────────────────
+  agent-a-mcp-counter:
+    allowed_remote_agents: []
+    allowed_mcp_servers:
+      - mcp-server
+    allowed_tools:
+      mcp-server:
+        - echo
+    limits:
+      per_tool_calls:
+        echo: 2                     # 3rd call → call-limit-exceeded

@@ -130,7 +130,7 @@ class ExtProcServicer(pb_grpc.ExternalProcessorServicer):
 
                 # A2A enforcement
                 elif method.startswith("tasks/"):
-                    allow, reason = a2a_enforcer.decide(caller_id, target_id)
+                    allow, reason = a2a_enforcer.decide(caller_id, target_id, len(body_bytes))
                     if not allow:
                         print(
                             f"[ext_proc] DENY  caller={caller_id}  target={target_id}"
@@ -149,7 +149,7 @@ class ExtProcServicer(pb_grpc.ExternalProcessorServicer):
                 # MCP tool enforcement
                 elif method == "tools/call":
                     tool_name = _extract_tool_name(body_bytes)
-                    allow, reason = mcp_enforcer.decide(caller_id, target_id, tool_name)
+                    allow, reason = mcp_enforcer.decide(caller_id, target_id, tool_name, len(body_bytes))
                     if not allow:
                         print(
                             f"[ext_proc] DENY  caller={caller_id}  target={target_id}"

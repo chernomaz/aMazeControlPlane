@@ -71,20 +71,22 @@ async def test_st3_1_async() -> None:
             "host": "mcp-server",
         },
     )
+    result = None
     try:
         async with Client(transport) as client:
             result = await client.call_tool("echo", {"text": "hello-sprint3"})
-            # result is a list of content items
-            result_text = str(result)
-            check("HTTP 200 (tool call succeeded)", True)
-            check(
-                "response contains echo text",
-                "hello-sprint3" in result_text,
-                f"got: {result_text[:120]}",
-            )
     except Exception as exc:
         check("tool call succeeded", False, str(exc))
         check("response contains echo text", False)
+        return
+
+    result_text = str(result)
+    check("tool call succeeded", True)
+    check(
+        "response contains echo text",
+        "hello-sprint3" in result_text,
+        f"got: {result_text[:120]}",
+    )
 
 
 def test_st3_1() -> None:
