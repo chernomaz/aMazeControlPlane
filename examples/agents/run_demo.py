@@ -2,7 +2,7 @@
 run_demo.py — Start Agent A and Agent B, watch the A2A hello exchange.
 
 Usage:
-    /home/ubuntu/venv/bin/python agents/run_demo.py
+    /home/ubuntu/venv/bin/python examples/agents/run_demo.py
 
 What happens:
     1. Agent B (CrewAI,   port 9002) starts first.

@@ -45,7 +45,7 @@ sleep 3
 echo "[sprint1] running hello exchange demo..."
 echo "──────────────────────────────────────────"
 PYTHONPATH="$REPO/policy_processor/proto" \
-  timeout 12 $PYTHON agents/run_demo.py || true
+  timeout 12 $PYTHON examples/agents/run_demo.py || true
 echo "──────────────────────────────────────────"
 
 cleanup

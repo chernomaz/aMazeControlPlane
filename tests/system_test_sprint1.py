@@ -57,8 +57,8 @@ def make_a2a_request(text: str = "hello") -> dict:
 def start_agent(name: str, port: int) -> subprocess.Popen:
     env = os.environ.copy()
     return subprocess.Popen(
-        [PYTHON, os.path.join(REPO, "agents", name, "main.py")],
-        cwd=os.path.join(REPO, "agents"),
+        [PYTHON, os.path.join(REPO, "examples", "agents", name, "main.py")],
+        cwd=os.path.join(REPO, "examples", "agents"),
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
