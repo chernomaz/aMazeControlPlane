@@ -1,9 +1,10 @@
-# A2A policies — Sprint 2
+# Agent policies — Sprint 3
 #
-# Each entry declares an agent and the remote agents it is allowed to call.
-# Callers not listed here are treated as unknown and denied.
+# A2A section: allowed_remote_agents
+# MCP section: allowed_mcp_servers + allowed_tools per server
 
 agents:
+  # ── A2A agents (Sprint 2) ────────────────────────────────────────────────
   agent-a:
     allowed_remote_agents:
       - agent-b
@@ -11,3 +12,12 @@ agents:
   agent-b:
     allowed_remote_agents:
       - agent-a
+
+  # ── MCP agent (Sprint 3) ─────────────────────────────────────────────────
+  agent-a-mcp:
+    allowed_remote_agents: []
+    allowed_mcp_servers:
+      - mcp-server
+    allowed_tools:
+      mcp-server:
+        - echo

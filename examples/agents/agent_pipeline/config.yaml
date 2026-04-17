@@ -1,0 +1,93 @@
+# Pipeline Agent Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Each pipeline matches an incoming A2A message and executes an ordered list
+# of steps.  Steps run sequentially; each step's output becomes {prev_result}
+# for the next step.  Named steps also expose {step_name} as a template key.
+#
+# Step types (inferred from the step's sub-keys):
+#   tool call  — any key whose value contains a "params" map
+#   agent call — any key whose value contains a "msg" string
+#   llm call   — the literal key "llm" with a "query" string
+#
+# Matching strategies (match_type):
+#   exact  — case-sensitive equality
+#   glob   — Unix shell wildcard (*, ?, [seq])  [default]
+#   regex  — full Python re.search()
+#
+# Template variables available in every string value:
+#   {input}       — original message text
+#   {prev_result} — output of the previous step (or {input} for the first)
+#   {<step_name>} — output of any named step earlier in the pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+
+agent_id: "agent-pipeline"
+port: 9010
+envoy_url: "http://localhost:10000"
+llm_model: "gpt-4o-mini"   # default model; litellm routes to any provider
+
+pipelines:
+
+  # ── Example 1: exact-match greeting ────────────────────────────────────────
+  - input: "hello"
+    match_type: exact
+    steps:
+      - name: shout
+        uppercase:
+          params:
+            text: "hello from pipeline agent"
+      - name: reply
+        llm:
+          query: "Reply warmly in one sentence to: {shout}"
+          max_tokens: 80
+
+  # ── Example 2: multi-step report pipeline ──────────────────────────────────
+  - input: "*report*"
+    match_type: glob
+    steps:
+      - name: collected
+        echo:
+          params:
+            text: "sales=1200 users=340 churn=2%"
+      - name: summary
+        llm:
+          query: "Summarise this business data in two bullet points: {collected}"
+          max_tokens: 150
+      - name: forwarded
+        agent-b:
+          msg: "Please review this summary: {summary}"
+
+  # ── Example 3: blabla demo (mirrors the README sketch) ─────────────────────
+  - input: "blabla"
+    match_type: exact
+    steps:
+      - name: step1
+        echo:
+          params:
+            text: "step-one output"
+      - name: step2
+        uppercase:
+          params:
+            text: "{step1}"
+      - name: step3
+        concat:
+          params:
+            parts:
+              - "{step2}"
+              - "appended"
+            separator: " | "
+      - name: from_b
+        agent-b:
+          msg: "Pipeline says: {step3}"
+      - name: final
+        llm:
+          query: "In one sentence, summarise: {from_b}"
+          max_tokens: 80
+
+  # ── Catch-all ───────────────────────────────────────────────────────────────
+  - input: "*"
+    match_type: glob
+    steps:
+      - name: result
+        echo:
+          params:
+            text: "No specific pipeline for '{input}' — echoing back."

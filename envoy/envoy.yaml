@@ -25,6 +25,11 @@ static_resources:
                       routes:
                         - match: { prefix: "/" }
                           route: { cluster: agent_b_cluster }
+                    - name: mcp_server
+                      domains: ["mcp-server"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: mcp_server_cluster }
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
@@ -73,6 +78,19 @@ static_resources:
                     socket_address:
                       address: 127.0.0.1
                       port_value: 9002
+
+    - name: mcp_server_cluster
+      connect_timeout: 5s
+      type: STATIC
+      load_assignment:
+        cluster_name: mcp_server_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: 9003
 
     - name: policy_processor
       connect_timeout: 5s
