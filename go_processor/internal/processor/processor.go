@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	envoytypev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -15,6 +16,7 @@ import (
 
 	"amaze/go_processor/internal/enforcer"
 	"amaze/go_processor/internal/limits"
+	"amaze/go_processor/internal/stats"
 )
 
 var llmTargets = map[string]bool{
@@ -37,10 +39,13 @@ var mcpPassthrough = map[string]bool{
 
 type Server struct {
 	extprocv3.UnimplementedExternalProcessorServer
+	Stats *stats.Collector
 }
 
 func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	var callerID, targetID string
+	var tStart time.Time    // set when a request is allowed; zero for passthrough/denied
+	var allowedTool string  // non-empty for allowed MCP tools/call
 
 	for {
 		req, err := stream.Recv()
@@ -63,6 +68,8 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 		case *extprocv3.ProcessingRequest_RequestBody:
 			body := r.RequestBody.Body
 			bodySize := len(body)
+			tStart = time.Time{}
+			allowedTool = ""
 
 			var resp *extprocv3.ProcessingResponse
 
@@ -72,10 +79,13 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 					fmt.Printf("[ext_proc] DENY  caller=%s  target=%s  type=llm  reason=%s\n",
 						callerID, targetID, reason)
 					resp = deny(429, reason)
+					s.Stats.RecordRequest(callerID, "", false)
 				} else {
 					fmt.Printf("[ext_proc] PASS  caller=%s  target=%s  type=llm  bytes=%d\n",
 						callerID, targetID, bodySize)
 					resp = continueBody()
+					s.Stats.RecordRequest(callerID, "", true)
+					tStart = time.Now()
 				}
 			} else {
 				method := extractMethod(body)
@@ -84,6 +94,7 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 					fmt.Printf("[ext_proc] PASS  caller=%s  target=%s  method=%s  (protocol)\n",
 						callerID, targetID, method)
 					resp = continueBody()
+					// no stats for protocol handshake
 
 				case strings.HasPrefix(method, "tasks/"):
 					allow, reason := enforcer.DecideA2A(callerID, targetID, bodySize)
@@ -91,10 +102,13 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 						fmt.Printf("[ext_proc] DENY  caller=%s  target=%s  method=%s  reason=%s\n",
 							callerID, targetID, method, reason)
 						resp = deny(403, reason)
+						s.Stats.RecordRequest(callerID, "", false)
 					} else {
 						fmt.Printf("[ext_proc] PASS  caller=%s  target=%s  method=%s  bytes=%d\n",
 							callerID, targetID, method, bodySize)
 						resp = continueBody()
+						s.Stats.RecordRequest(callerID, "", true)
+						tStart = time.Now()
 					}
 
 				case method == "tools/call":
@@ -104,16 +118,21 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 						fmt.Printf("[ext_proc] DENY  caller=%s  target=%s  method=%s  tool=%s  reason=%s\n",
 							callerID, targetID, method, toolName, reason)
 						resp = deny(403, reason)
+						s.Stats.RecordRequest(callerID, "", false)
 					} else {
 						fmt.Printf("[ext_proc] PASS  caller=%s  target=%s  method=%s  tool=%s  bytes=%d\n",
 							callerID, targetID, method, toolName, bodySize)
 						resp = continueBody()
+						s.Stats.RecordRequest(callerID, toolName, true)
+						tStart = time.Now()
+						allowedTool = toolName
 					}
 
 				default:
 					fmt.Printf("[ext_proc] DENY  caller=%s  target=%s  method=%s  reason=unknown-method\n",
 						callerID, targetID, method)
 					resp = deny(403, "unknown-method")
+					s.Stats.RecordRequest(callerID, "", false)
 				}
 			}
 
@@ -128,6 +147,10 @@ func (s *Server) Process(stream extprocv3.ExternalProcessor_ProcessServer) error
 			tokens := extractTokens(r.ResponseBody.Body)
 			if tokens > 0 {
 				limits.GetTokenTracker().Record(callerID, tokens)
+				fmt.Printf("[ext_proc] TOKENS caller=%s  tokens=%d\n", callerID, tokens)
+			}
+			if !tStart.IsZero() {
+				s.Stats.RecordResponse(callerID, allowedTool, time.Since(tStart), tokens)
 			}
 			if err := stream.Send(continueResponseBody()); err != nil {
 				return err
@@ -266,4 +289,3 @@ func deny(statusCode int, reason string) *extprocv3.ProcessingResponse {
 		},
 	}
 }
-

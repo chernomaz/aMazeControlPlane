@@ -10,7 +10,9 @@ import (
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"google.golang.org/grpc"
 
+	"amaze/go_processor/internal/api"
 	"amaze/go_processor/internal/processor"
+	"amaze/go_processor/internal/stats"
 	"amaze/go_processor/internal/store"
 )
 
@@ -19,12 +21,24 @@ func main() {
 	if port == "" {
 		port = "50051"
 	}
+	statsAddr := os.Getenv("STATS_ADDR")
+	if statsAddr == "" {
+		statsAddr = ":8081"
+	}
 	policyPath := os.Getenv("POLICY_PATH")
 
 	if err := store.Init(policyPath); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load policies: %v\n", err)
 		os.Exit(1)
 	}
+
+	col := stats.NewCollector()
+	if col == nil {
+		fmt.Fprintln(os.Stderr, "stats.NewCollector returned nil")
+		os.Exit(1)
+	}
+	api.StartHTTP(statsAddr, col)
+	fmt.Printf("[policy-processor] stats API on %s\n", statsAddr)
 
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
@@ -36,7 +50,7 @@ func main() {
 		grpc.MaxRecvMsgSize(10*1024*1024),
 		grpc.MaxSendMsgSize(10*1024*1024),
 	)
-	extprocv3.RegisterExternalProcessorServer(srv, &processor.Server{})
+	extprocv3.RegisterExternalProcessorServer(srv, &processor.Server{Stats: col})
 
 	done := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)
