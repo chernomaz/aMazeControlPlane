@@ -87,14 +87,16 @@ async def receive(request: Request):
 
     print(f"[{AGENT_ID}/CrewAI]   received hello from agent-a", flush=True)
 
-    # Invoke the CrewAI-registered tool in a thread executor so the blocking
-    # httpx call doesn't hold the uvicorn event loop.
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None, lambda: send_a2a_message._run(target_url=ENVOY_URL, text="hello")
-    )
+    # Attempt to call back to agent-a (non-fatal if agent-a is not running).
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(
+            None, lambda: send_a2a_message._run(target_url=ENVOY_URL, text="hello")
+        )
+    except Exception as exc:
+        print(f"[{AGENT_ID}/CrewAI] callback to agent-a failed (non-fatal): {exc}", flush=True)
 
-    return JSONResponse(build_response(task_id, rpc_id, "acknowledged"))
+    return JSONResponse(build_response(task_id, rpc_id, f"hello back from {AGENT_ID}"))
 
 
 if __name__ == "__main__":

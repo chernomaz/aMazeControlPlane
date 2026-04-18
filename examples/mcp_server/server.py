@@ -1,6 +1,7 @@
 import inspect
 import importlib.util
 import logging
+import os
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -56,6 +57,7 @@ def discover_tools(mod):
             tools.append(obj)
     return tools
 
+
 def register_langchain_tool(tool: BaseTool):
     if getattr(tool, "coroutine", None):
         fn = tool.coroutine
@@ -71,31 +73,8 @@ def register_langchain_tool(tool: BaseTool):
         extra={"trace_id": "-"},
     )
 
-    # ✅ בלי name / description
     mcp.add_tool(fn)
-# def register_langchain_tool(tool: BaseTool):
-#     # for @tool async def ...
-#     if getattr(tool, "coroutine", None) is not None:
-#         fn = tool.coroutine
-#     # for @tool def ...
-#     elif getattr(tool, "func", None) is not None:
-#         fn = tool.func
-#     else:
-#         raise ValueError(f"Tool {tool.name} has no func/coroutine to register")
-#
-#     logger.info(
-#         "Registering tool %s using function %s",
-#         tool.name,
-#         fn.__name__,
-#         extra={"trace_id": "-"},
-#     )
-#
-#     mcp.add_tool(
-#         fn,
-#         name=tool.name,
-#         description=tool.description,
-#     )
-#
+
 
 def load_tools():
     logger.info("Looking for tools in %s", TOOLS_DIR, extra={"trace_id": "-"})
@@ -106,17 +85,37 @@ def load_tools():
 
     for f in files:
         logger.info("Loading module from %s", f, extra={"trace_id": "-"})
-        mod = load_module(f)
+        try:
+            mod = load_module(f)
+        except Exception as exc:
+            logger.warning(
+                "Skipping %s — failed to load: %s",
+                f.name,
+                exc,
+                extra={"trace_id": "-"},
+            )
+            continue
+
         tools = discover_tools(mod)
 
         if not tools:
             logger.warning("No tools found in %s", f.name, extra={"trace_id": "-"})
 
         for t in tools:
-            register_langchain_tool(t)
+            try:
+                register_langchain_tool(t)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping tool %s — registration failed: %s",
+                    t.name,
+                    exc,
+                    extra={"trace_id": "-"},
+                )
 
 
 load_tools()
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    logger.info("Starting MCP server on port %d", port, extra={"trace_id": "-"})
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=port)

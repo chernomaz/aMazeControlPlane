@@ -30,6 +30,11 @@ static_resources:
                       routes:
                         - match: { prefix: "/" }
                           route: { cluster: mcp_server_cluster }
+                    - name: search_mcp
+                      domains: ["search-mcp"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: search_mcp_cluster }
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
@@ -92,6 +97,19 @@ static_resources:
                       address: 127.0.0.1
                       port_value: 9003
 
+    - name: search_mcp_cluster
+      connect_timeout: 5s
+      type: STATIC
+      load_assignment:
+        cluster_name: search_mcp_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: 9004
+
     - name: policy_processor
       connect_timeout: 5s
       type: STATIC
@@ -109,6 +127,13 @@ static_resources:
                     socket_address:
                       address: 127.0.0.1
                       port_value: 50051
+
+overload_manager:
+  resource_monitors:
+    - name: envoy.resource_monitors.global_downstream_max_connections
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 50000
 
 admin:
   address:
