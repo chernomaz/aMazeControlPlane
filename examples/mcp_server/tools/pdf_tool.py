@@ -75,8 +75,17 @@ def build_vectorstore_once() -> Chroma:
 
 
 
-vectorstore = build_vectorstore_once()
-retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+_vectorstore = None
+_retriever = None
+
+
+def _get_retriever():
+    global _vectorstore, _retriever
+    if _retriever is None:
+        _vectorstore = build_vectorstore_once()
+        _retriever = _vectorstore.as_retriever(search_kwargs={"k": 4})
+    return _retriever
+
 
 # ---------- Tools ----------
 @tool
@@ -84,7 +93,7 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 def pdf_search(query: str) -> str:
     """Search the local PDF collection and return relevant passages with sources."""
     logger.info("pdf_search invoke %s", query)
-    docs = retriever.invoke(query)
+    docs = _get_retriever().invoke(query)
     if not docs:
         return "No relevant PDF content found."
 

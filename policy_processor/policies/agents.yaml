@@ -46,6 +46,14 @@ agents:
       mcp-server:
         - echo
 
+  # ── LLM token-limit test (ST-6.x) ───────────────────────────────────────────
+  agent-llm-test:
+    allowed_remote_agents: []
+    allowed_mcp_servers: []
+    limits:
+      max_tokens_per_minute: 10
+      rate_window_seconds: 10          # short window so tests don't wait 60 s
+
   # ── MCP agent — call-count test (ST-4.3) ─────────────────────────────────────
   agent-a-mcp-counter:
     allowed_remote_agents: []

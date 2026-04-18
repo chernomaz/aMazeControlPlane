@@ -13,6 +13,7 @@ type Limits struct {
 	MaxRequestsPerMinute *int           `yaml:"max_requests_per_minute"`
 	RateWindowSeconds    *float64       `yaml:"rate_window_seconds"`
 	PerToolCalls         map[string]int `yaml:"per_tool_calls"`
+	MaxTokensPerMinute   *int           `yaml:"max_tokens_per_minute"`
 }
 
 type AgentPolicy struct {
