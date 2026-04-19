@@ -1,0 +1,27 @@
+# MCP-server NEMO container image — Phase 8B Slice 1.
+#
+# Wraps examples/mcp_server/ (fastmcp + web_search tool) in the NEMO lifecycle:
+# single-shot registration with the Orchestrator, then `mcp.run()` on 0.0.0.0.
+FROM python:3.12-slim
+
+# fastmcp pulls in MCP + starlette/uvicorn. web_search needs tavily + langsmith
+# + @tool from langchain-core + python-dotenv. Everything else the existing
+# tools/ dir references (langchain_chroma, langchain_openai, etc.) is not
+# needed for Slice 1 and would bloat the image — those tools just fail to
+# load in server.py and are skipped.
+RUN pip install --no-cache-dir \
+    "fastmcp==3.2.3" \
+    "langchain-core==0.3.24" \
+    "langsmith==0.2.2" \
+    "tavily-python==0.5.0" \
+    "python-dotenv==1.1.0"
+
+WORKDIR /app
+COPY docker/nemo_mcp.py /app/nemo_mcp.py
+COPY examples/mcp_server /app/mcp_server
+
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+CMD ["python", "/app/nemo_mcp.py"]

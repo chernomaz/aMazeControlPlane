@@ -1,0 +1,14 @@
+# Orchestrator build image.
+FROM golang:1.22 AS build
+WORKDIR /src
+COPY orchestrator/ /src/
+RUN go build -o /orchestrator .
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /orchestrator /usr/local/bin/orchestrator
+COPY orchestrator/static /app/static
+WORKDIR /app
+ENV ORCH_STATIC_DIR=/app/static
+EXPOSE 7000
+CMD ["/usr/local/bin/orchestrator"]

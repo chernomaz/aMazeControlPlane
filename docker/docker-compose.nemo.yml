@@ -1,0 +1,128 @@
+# docker-compose for the NEMO stack, Sprint 8 Phase 8A.
+#
+# Start:   docker compose -f docker/docker-compose.nemo.yml up -d --build
+# Stop:    docker compose -f docker/docker-compose.nemo.yml down
+#
+# Services:
+#   orchestrator     — registration + policy push + chat relay (:7000)
+#   policy-processor — Go ext_proc server (:50051) + stats (:8081) + config (:8082)
+#   envoy            — forward proxy (:10000) + admin (:9901)
+#   agent-a, agent-b — NEMO containers registering with orchestrator
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.orchestrator
+    container_name: amaze-orchestrator
+    environment:
+      ORCH_ADDR: ":7000"
+      POLICY_PROCESSOR_CONFIG_URL: "http://policy-processor:8082"
+    ports:
+      - "7000:7000"
+    networks:
+      - amaze-net
+    depends_on:
+      - policy-processor
+
+  policy-processor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.policy-processor
+    container_name: amaze-policy-processor
+    environment:
+      POLICY_PATH: ":empty:"
+      POLICY_PROCESSOR_PORT: "50051"
+      STATS_ADDR: ":8081"
+      CONFIG_ADDR: ":8082"
+    # 8081 (stats) and 8082 (config) are unauthenticated admin surfaces.
+    # Bound to 127.0.0.1 so only the host running compose can hit them;
+    # in-cluster services reach them via the service DNS name.
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+    networks:
+      - amaze-net
+
+  envoy:
+    image: envoyproxy/envoy:v1.32.0
+    container_name: amaze-envoy
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warning"]
+    volumes:
+      - ../envoy/envoy.nemo.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "10000:10000"
+      - "9901:9901"
+    networks:
+      - amaze-net
+    depends_on:
+      - policy-processor
+
+  agent-a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nemo
+    container_name: nemo-agent-a
+    environment:
+      AMAZE_AGENT_ID: "agent-a"
+      AMAZE_CONTAINER_HOST: "agent-a"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,localhost,127.0.0.1"
+    # Chat port exposed for system tests that drive the agent directly;
+    # A2A port (9002) is NOT exposed — all A2A must go through Envoy.
+    ports:
+      - "18080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+
+  mcp-echo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    container_name: nemo-mcp-echo
+    environment:
+      AMAZE_MCP_ID: "mcp-echo"
+      AMAZE_CONTAINER_HOST: "mcp-echo"
+      AMAZE_MCP_PORT: "8000"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+    # MCP port NOT exposed to the host — Slice 2 will route MCP traffic
+    # through Envoy like A2A. Slice 1 only exercises registration.
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+
+  agent-b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nemo
+    container_name: nemo-agent-b
+    environment:
+      AMAZE_AGENT_ID: "agent-b"
+      AMAZE_CONTAINER_HOST: "agent-b"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,localhost,127.0.0.1"
+    ports:
+      - "28080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+
+networks:
+  amaze-net:
+    driver: bridge

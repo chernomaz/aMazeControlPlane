@@ -32,7 +32,13 @@ type PolicyStore struct {
 var instance *PolicyStore
 
 // Init must be called once from main before any requests are served.
+// A path of ":empty:" starts the store with no policies; policies are then pushed
+// in at runtime via the config API (used when the Orchestrator owns policy state).
 func Init(path string) error {
+	if path == ":empty:" {
+		instance = &PolicyStore{path: "", agents: map[string]*AgentPolicy{}}
+		return nil
+	}
 	if path == "" {
 		path = "policy_processor/policies/agents.yaml"
 	}
@@ -71,4 +77,33 @@ func (s *PolicyStore) GetAgent(agentID string) (*AgentPolicy, bool) {
 	defer s.mu.RUnlock()
 	p, ok := s.agents[agentID]
 	return p, ok
+}
+
+// Upsert replaces (or inserts) the policy for a single agent.
+// Orchestrator uses this to push per-agent policy updates without touching the YAML file.
+func (s *PolicyStore) Upsert(agentID string, policy *AgentPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.agents == nil {
+		s.agents = map[string]*AgentPolicy{}
+	}
+	s.agents[agentID] = policy
+}
+
+// Delete removes a single agent policy.
+func (s *PolicyStore) Delete(agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.agents, agentID)
+}
+
+// AgentIDs returns the list of currently-known agent IDs (snapshot).
+func (s *PolicyStore) AgentIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.agents))
+	for id := range s.agents {
+		ids = append(ids, id)
+	}
+	return ids
 }

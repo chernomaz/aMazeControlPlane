@@ -1,0 +1,12 @@
+# Go Policy Processor build image.
+FROM golang:1.22 AS build
+WORKDIR /src
+COPY go_processor/ /src/
+RUN go build -o /go-policy-processor ./cmd/server
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /go-policy-processor /usr/local/bin/go-policy-processor
+ENV POLICY_PATH=:empty:
+EXPOSE 50051 8081 8082
+CMD ["/usr/local/bin/go-policy-processor"]

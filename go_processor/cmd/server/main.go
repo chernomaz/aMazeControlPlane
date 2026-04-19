@@ -25,6 +25,10 @@ func main() {
 	if statsAddr == "" {
 		statsAddr = ":8081"
 	}
+	configAddr := os.Getenv("CONFIG_ADDR")
+	if configAddr == "" {
+		configAddr = ":8082"
+	}
 	policyPath := os.Getenv("POLICY_PATH")
 
 	if err := store.Init(policyPath); err != nil {
@@ -33,12 +37,10 @@ func main() {
 	}
 
 	col := stats.NewCollector()
-	if col == nil {
-		fmt.Fprintln(os.Stderr, "stats.NewCollector returned nil")
-		os.Exit(1)
-	}
 	api.StartHTTP(statsAddr, col)
 	fmt.Printf("[policy-processor] stats API on %s\n", statsAddr)
+	api.StartConfigHTTP(configAddr)
+	fmt.Printf("[policy-processor] config API on %s\n", configAddr)
 
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {

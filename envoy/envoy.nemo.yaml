@@ -1,0 +1,146 @@
+# Envoy config for the NEMO compose stack (Sprint 8, Phase 8A).
+#
+# Differences from envoy/envoy.yaml:
+#   - Upstream hosts are Docker service names (agent-a, agent-b, policy-processor)
+#   - Only A2A routing is needed for Phase 8A; MCP/LLM clusters are added in 8B
+static_resources:
+
+  listeners:
+    - name: main
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format_source:
+                          inline_string: "[envoy] %RESPONSE_CODE% %RESPONSE_CODE_DETAILS% up=%UPSTREAM_HOST% flags=%RESPONSE_FLAGS% %REQ(:METHOD)% %REQ(HOST)%%REQ(:PATH)%\n"
+                route_config:
+                  name: local_routes
+                  virtual_hosts:
+                    - name: agent_a
+                      domains: ["agent-a", "agent-a:9002"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: agent_a_cluster
+                            # First requests after cold start can race STRICT_DNS
+                            # resolution. Retry briefly on 5xx/connect-failure so
+                            # the first allowed A2A call doesn't flake.
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 2s
+                    - name: agent_b
+                      domains: ["agent-b", "agent-b:9002"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: agent_b_cluster
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 2s
+                http_filters:
+                  - name: envoy.filters.http.ext_proc
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: policy_processor
+                      failure_mode_allow: false
+                      processing_mode:
+                        request_header_mode: SEND
+                        response_header_mode: SKIP
+                        request_body_mode: BUFFERED
+                        response_body_mode: BUFFERED
+                        request_trailer_mode: SKIP
+                        response_trailer_mode: SKIP
+                      message_timeout: 5s
+                      max_message_timeout: 10s
+                      allow_mode_override: false
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    # Short refresh windows so that when an agent container comes up AFTER
+    # Envoy (compose ordering), the cluster picks up the endpoint within ~1s
+    # instead of the default 5s — otherwise the first allowed A2A after boot
+    # races with DNS resolution and returns 503 no_healthy_upstream.
+    - name: agent_a_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: agent_a_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: agent-a
+                      port_value: 9002
+
+    - name: agent_b_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: agent_b_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: agent-b
+                      port_value: 9002
+
+    - name: policy_processor
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: policy_processor
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: policy-processor
+                      port_value: 50051
+
+overload_manager:
+  resource_monitors:
+    - name: envoy.resource_monitors.global_downstream_max_connections
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 50000
+
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
