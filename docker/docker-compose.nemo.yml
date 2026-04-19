@@ -83,18 +83,25 @@ services:
       - orchestrator
       - envoy
 
-  mcp-echo:
+  mcp-5-tools:
     build:
       context: ..
       dockerfile: docker/Dockerfile.mcp
-    container_name: nemo-mcp-echo
+    container_name: nemo-mcp-5-tools
+    # Slice 2 — web_search tool needs TAVILY_API_KEY. The repo-root .env is
+    # gitignored; env_file makes compose inject its keys as container env.
+    env_file:
+      - ../.env
     environment:
-      AMAZE_MCP_ID: "mcp-echo"
-      AMAZE_CONTAINER_HOST: "mcp-echo"
+      AMAZE_MCP_ID: "mcp-5-tools"
+      AMAZE_CONTAINER_HOST: "mcp-5-tools"
       AMAZE_MCP_PORT: "8000"
       AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
-    # MCP port NOT exposed to the host — Slice 2 will route MCP traffic
-    # through Envoy like A2A. Slice 1 only exercises registration.
+    # MCP port NOT exposed to the host — Slice 2 routes MCP traffic through
+    # Envoy like A2A, so the tool-call path is policy-enforced.
+    # on-failure restart lets nemo_mcp.py exit on registration failure
+    # (see fail_fatal) and get rescued instead of leaking a zombie MCP.
+    restart: on-failure
     networks:
       - amaze-net
     depends_on:

@@ -86,8 +86,8 @@ for i in {1..60}; do
   fi
   sleep 1
   if [ "$i" -eq 60 ]; then
-    echo "[sprint8b] mcp-echo did not register (got $count)" >&2
-    $COMPOSE logs mcp-echo orchestrator | tail -80 >&2
+    echo "[sprint8b] mcp-5-tools did not register (got $count)" >&2
+    $COMPOSE logs mcp-5-tools orchestrator | tail -80 >&2
     exit 1
   fi
 done

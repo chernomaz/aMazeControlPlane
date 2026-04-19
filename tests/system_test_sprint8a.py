@@ -233,17 +233,21 @@ def st_8_10() -> None:
         ok = status == "RUNNING"
         report("ST-8.10 restart fast-path", ok, f"status={status}")
 
-        # And the agent's own healthz should also show RUNNING.
-        time.sleep(0.5)
+        # And the agent's own healthz should also show RUNNING. After a
+        # container restart the app-level status flips ~1–2s after the orch
+        # status does (register → poll → mark_running), so poll instead of
+        # sleeping a fixed interval.
+        hz_status = wait_healthz(AGENT_A_CHAT, "RUNNING", timeout=15)
         try:
             hz = httpx.get(f"{AGENT_A_CHAT}/healthz", timeout=5).json()
-            report(
-                "ST-8.10 agent healthz RUNNING",
-                hz.get("status") == "RUNNING",
-                f"healthz={hz}",
-            )
         except Exception as e:
             report("ST-8.10 agent healthz RUNNING", False, str(e))
+            return
+        report(
+            "ST-8.10 agent healthz RUNNING",
+            hz_status == "RUNNING",
+            f"healthz={hz}",
+        )
     except subprocess.CalledProcessError as e:
         report("ST-8.10 restart fast-path", False, f"docker restart: {e}")
     except Exception as e:

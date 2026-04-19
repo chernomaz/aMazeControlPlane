@@ -30,6 +30,9 @@ from http import HTTPStatus
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+from mcp import McpError
 import uvicorn
 
 
@@ -224,6 +227,126 @@ async def a2a_to(target: str, req: Request) -> JSONResponse:
         body = resp.text
     return JSONResponse(
         {"status_code": resp.status_code, "body": body},
+        status_code=200,
+    )
+
+
+# ── MCP client helper (Phase 8B Slice 2) ─────────────────────────────────────
+#
+# POST /mcp-call/{server}/{tool} { "arguments": {...} }
+#
+# Routes an MCP `tools/call` through Envoy (picked up via HTTP_PROXY env var
+# inside httpx.AsyncClient, trust_env defaults to True). The MCP streamable-http
+# session handshake (initialize, notifications/initialized) passes through the
+# Policy Processor as `protocol` methods; the `tools/call` step is what gets
+# enforced. A 403 from Envoy surfaces here as an exception — the endpoint never
+# raises, it always returns a structured JSON response so tests can assert on it.
+
+@chat_app.post("/mcp-call/{server}/{tool}")
+async def mcp_call(server: str, tool: str, req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    arguments = body.get("arguments") or {}
+
+    # Resolve host:port from the orchestrator registry instead of hard-coding
+    # :8000. Different MCPs can register on different ports; trust the source.
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=3) as oc:
+            r = await oc.get(f"{ORCHESTRATOR_URL}/mcp")
+            r.raise_for_status()
+            entry = next(
+                (m for m in r.json().get("mcp_servers") or [] if m.get("mcp_id") == server),
+                None,
+            )
+    except httpx.HTTPError as e:
+        return JSONResponse(
+            {"ok": False, "error": f"registry lookup failed: {e}"},
+            status_code=200,
+        )
+    if entry is None:
+        return JSONResponse(
+            {"ok": False, "error": f"mcp {server!r} not in registry"},
+            status_code=200,
+        )
+    url = f"http://{entry['host']}:{entry['port']}/mcp/"
+
+    # Capture any 4xx/5xx body via an httpx response hook so the caller can
+    # assert on Envoy's deny reason. fastmcp/httpx closes streaming responses
+    # before our except block can aread() them; the hook runs while the
+    # response is still open, which is the only reliable window.
+    captured: dict[str, object] = {}
+
+    async def capture_error_body(resp: httpx.Response) -> None:
+        if resp.status_code >= 400:
+            try:
+                await resp.aread()
+                captured["status_code"] = resp.status_code
+                captured["body"] = resp.text
+            except Exception:
+                captured["status_code"] = resp.status_code
+
+    def client_factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+        follow_redirects: bool = True,
+    ) -> httpx.AsyncClient:
+        kwargs: dict = {
+            "follow_redirects": follow_redirects,
+            "event_hooks": {"response": [capture_error_body]},
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if headers is not None:
+            kwargs["headers"] = headers
+        if auth is not None:
+            kwargs["auth"] = auth
+        return httpx.AsyncClient(**kwargs)
+
+    transport = StreamableHttpTransport(
+        url,
+        headers={"x-agent-id": AGENT_ID},
+        httpx_client_factory=client_factory,
+    )
+
+    try:
+        async with Client(transport) as client:
+            result = await client.call_tool(tool, arguments)
+    except (httpx.HTTPError, McpError, RuntimeError) as e:
+        status_code = captured.get("status_code")
+        reason: str | None = None
+        raw = captured.get("body")
+        if isinstance(raw, str) and raw:
+            try:
+                body_json = json.loads(raw)
+                reason = body_json.get("reason") or body_json.get("error")
+            except Exception:
+                reason = raw[:200]
+        return JSONResponse(
+            {
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "status_code": status_code,
+                "reason": reason,
+            },
+            status_code=200,
+        )
+
+    content = []
+    for c in result.content or []:
+        text = getattr(c, "text", None)
+        content.append({"type": getattr(c, "type", "unknown"), "text": text})
+    return JSONResponse(
+        {
+            "ok": not result.is_error,
+            "is_error": bool(result.is_error),
+            "content": content,
+        },
         status_code=200,
     )
 

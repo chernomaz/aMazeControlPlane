@@ -50,6 +50,21 @@ static_resources:
                               retry_on: "connect-failure,refused-stream,5xx"
                               num_retries: 3
                               per_try_timeout: 2s
+                    - name: mcp_5_tools
+                      domains: ["mcp-5-tools", "mcp-5-tools:8000"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: mcp_5_tools_cluster
+                            # MCP streamable-http tool calls can take several
+                            # seconds (Tavily round-trip); bump the per-try
+                            # budget so ext_proc doesn't trip its message
+                            # timeout while upstream is still thinking.
+                            timeout: 30s
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 10s
                 http_filters:
                   - name: envoy.filters.http.ext_proc
                     typed_config:
@@ -112,6 +127,24 @@ static_resources:
                     socket_address:
                       address: agent-b
                       port_value: 9002
+
+    - name: mcp_5_tools_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: mcp_5_tools_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: mcp-5-tools
+                      port_value: 8000
 
     - name: policy_processor
       connect_timeout: 5s

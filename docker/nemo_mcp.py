@@ -46,6 +46,17 @@ def wait_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
     return False
 
 
+def fail_fatal(msg: str) -> None:
+    """Print a fatal message and kill the whole process (from any thread).
+
+    Registration failure must not leave an orphaned MCP serving on :8000 that
+    the orchestrator has no record of. Exiting lets compose's restart policy
+    rescue us instead of leaking a zombie.
+    """
+    print(f"[nemo-mcp {MCP_ID}] FATAL: {msg}", flush=True)
+    os._exit(1)
+
+
 def register_once() -> None:
     """Wait for the local MCP socket, then POST /mcp/register exactly once.
 
@@ -53,12 +64,7 @@ def register_once() -> None:
     itself is bad — no amount of retrying will fix it, so we bail immediately.
     """
     if not wait_port_open("127.0.0.1", MCP_PORT):
-        print(
-            f"[nemo-mcp {MCP_ID}] mcp port {MCP_PORT} never came up; "
-            "skipping registration",
-            flush=True,
-        )
-        return
+        fail_fatal(f"mcp port {MCP_PORT} never came up")
 
     body = json.dumps(
         {"mcp_id": MCP_ID, "host": CONTAINER_HOST, "port": MCP_PORT}
@@ -77,11 +83,7 @@ def register_once() -> None:
                 return
         except urllib.error.HTTPError as e:
             if 400 <= e.code < 500:
-                print(
-                    f"[nemo-mcp {MCP_ID}] register rejected {e.code}: giving up",
-                    flush=True,
-                )
-                return
+                fail_fatal(f"register rejected {e.code} — payload bad")
             print(
                 f"[nemo-mcp {MCP_ID}] register attempt {attempt+1} got {e.code}",
                 flush=True,
@@ -93,7 +95,7 @@ def register_once() -> None:
                 flush=True,
             )
             time.sleep(2)
-    print(f"[nemo-mcp {MCP_ID}] giving up on registration", flush=True)
+    fail_fatal("giving up on registration after 30 attempts")
 
 
 def run_server() -> None:
