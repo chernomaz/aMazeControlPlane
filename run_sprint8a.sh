@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sprint 8 — Phase 8A: NEMO Container + Orchestrator.
+# Sprint 8 — Phase 8A: agent container + orchestrator.
 #
 # Boots the full enforcement stack in Docker Compose, waits for health,
 # then runs the Phase 8A system tests against the real stack (no mocks).
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE="docker compose -f $REPO/docker/docker-compose.nemo.yml"
+COMPOSE="docker compose -f $REPO/docker/docker-compose.yml"
 
 cmd=${1:-run}
 
@@ -23,7 +23,7 @@ case "$cmd" in
     ;;
 esac
 
-echo "=== Sprint 8 — Phase 8A: NEMO + Orchestrator ==="
+echo "=== Sprint 8 — Phase 8A: agent + orchestrator ==="
 
 # Clean any previous run.
 $COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true

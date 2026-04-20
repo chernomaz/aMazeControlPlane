@@ -1,0 +1,29 @@
+# Agent base container image for aMaze Control Plane (Phase 8A+).
+#
+# Minimal Python environment that:
+#   - Registers with the Orchestrator on startup
+#   - Waits for policy assignment before serving traffic (returns 503 until RUNNING)
+#   - Routes all outbound HTTP through the Envoy proxy via HTTP_PROXY
+#
+# Phase 8B Slice 3 adds patched openai/anthropic SDKs that rewrite base_url
+# to route through Envoy → LiteLLM sidecar.
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir \
+    "fastapi==0.115.0" \
+    "uvicorn[standard]==0.35.0" \
+    "httpx==0.28.1" \
+    "fastmcp==3.2.3" \
+    "openai==1.60.2" \
+    "anthropic==0.42.0"
+
+WORKDIR /app
+COPY docker/agent.py /app/agent.py
+COPY sdk_patches /app/sdk_patches
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+EXPOSE 8080 9002
+
+CMD ["python", "/app/agent.py"]

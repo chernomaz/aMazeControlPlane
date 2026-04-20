@@ -1,0 +1,15 @@
+# a2a_proxy sidecar — Sprint 8 Phase 8B Slice 5.
+#
+# Tiny Go HTTP-in, HTTPS-out forward proxy for cross-organisation A2A.
+# See docker/a2a_proxy/main.go for data flow.
+FROM golang:1.22 AS build
+WORKDIR /src
+COPY docker/a2a_proxy/go.mod /src/
+COPY docker/a2a_proxy/main.go /src/
+RUN go build -o /a2a-proxy .
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /a2a-proxy /usr/local/bin/a2a-proxy
+EXPOSE 8082
+CMD ["/usr/local/bin/a2a-proxy"]

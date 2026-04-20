@@ -1,0 +1,32 @@
+# LiteLLM sidecar config — Sprint 8 Phase 8B Slice 3.
+#
+# Patched openai/anthropic SDKs inside NEMO containers send requests to
+# http://envoy:10000 with Host: litellm. Envoy forwards plain HTTP to this
+# LiteLLM container, which originates TLS to the real upstream provider so
+# Envoy can still inspect request/response bodies and extract usage tokens.
+#
+# Model aliases here match the names the agent code uses directly
+# (`openai.OpenAI().chat.completions.create(model="gpt-4o-mini", ...)`).
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: claude-3-5-haiku-latest
+    litellm_params:
+      model: anthropic/claude-3-5-haiku-latest
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  # No master key — the sidecar listens only on the internal amaze-net and
+  # agents reach it through Envoy, which is the enforcement point.
+  telemetry: false

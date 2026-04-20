@@ -50,6 +50,38 @@ static_resources:
                               retry_on: "connect-failure,refused-stream,5xx"
                               num_retries: 3
                               per_try_timeout: 2s
+                    # Sprint 9 Agent SDK demo agents. Same shape as agent-a/b
+                    # — the SDK's inbound A2A port is 9002 on each container.
+                    - name: sdk_agent_a
+                      domains: ["sdk-agent-a", "sdk-agent-a:9002"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: sdk_agent_a_cluster
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 2s
+                    - name: sdk_agent_b
+                      domains: ["sdk-agent-b", "sdk-agent-b:9002"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: sdk_agent_b_cluster
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 2s
+                    - name: sdk_agent_llm
+                      domains: ["sdk-agent-llm", "sdk-agent-llm:9002"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: sdk_agent_llm_cluster
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 3
+                              per_try_timeout: 2s
                     - name: mcp_5_tools
                       domains: ["mcp-5-tools", "mcp-5-tools:8000"]
                       routes:
@@ -64,6 +96,42 @@ static_resources:
                             retry_policy:
                               retry_on: "connect-failure,refused-stream,5xx"
                               num_retries: 3
+                              per_try_timeout: 10s
+                    # LiteLLM sidecar — Phase 8B Slice 3. Patched openai/anthropic
+                    # SDKs rewrite base_url to http://envoy:10000 with Host: litellm;
+                    # Envoy forwards plain HTTP to the LiteLLM container, which
+                    # originates TLS to the real provider. Envoy sees the full
+                    # request + response body so ext_proc can extract usage tokens.
+                    - name: litellm
+                      domains: ["litellm", "litellm:4000"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: litellm_cluster
+                            timeout: 60s
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 2
+                              per_try_timeout: 30s
+                    # Cross-org A2A partner — Phase 8B Slice 5. Agent sends
+                    # plain HTTP with Host: partner-agent.example.com through
+                    # the Envoy proxy. ext_proc sees `target=partner-agent.example.com`
+                    # and runs DecideA2A against that FQDN verbatim. Envoy
+                    # forwards to the a2a_proxy sidecar (no host_rewrite),
+                    # which reads the same Host header to dial the real
+                    # HTTPS partner. Full round-trip is enforceable.
+                    - name: partner_agent_example_com
+                      domains:
+                        - "partner-agent.example.com"
+                        - "partner-agent.example.com:80"
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: a2a_proxy_cluster
+                            timeout: 30s
+                            retry_policy:
+                              retry_on: "connect-failure,refused-stream,5xx"
+                              num_retries: 2
                               per_try_timeout: 10s
                 http_filters:
                   - name: envoy.filters.http.ext_proc
@@ -128,6 +196,60 @@ static_resources:
                       address: agent-b
                       port_value: 9002
 
+    - name: sdk_agent_a_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: sdk_agent_a_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: sdk-agent-a
+                      port_value: 9002
+
+    - name: sdk_agent_b_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: sdk_agent_b_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: sdk-agent-b
+                      port_value: 9002
+
+    - name: sdk_agent_llm_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: sdk_agent_llm_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: sdk-agent-llm
+                      port_value: 9002
+
     - name: mcp_5_tools_cluster
       connect_timeout: 5s
       type: STRICT_DNS
@@ -145,6 +267,42 @@ static_resources:
                     socket_address:
                       address: mcp-5-tools
                       port_value: 8000
+
+    - name: litellm_cluster
+      connect_timeout: 10s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: litellm_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: litellm
+                      port_value: 4000
+
+    - name: a2a_proxy_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 1s
+      dns_failure_refresh_rate:
+        base_interval: 0.5s
+        max_interval: 2s
+      load_assignment:
+        cluster_name: a2a_proxy_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: a2a-proxy
+                      port_value: 8082
 
     - name: policy_processor
       connect_timeout: 5s

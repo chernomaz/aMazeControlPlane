@@ -1,0 +1,565 @@
+"""Agent container — Phase 8A.
+
+Minimal agent runtime that exercises the full lifecycle:
+
+  1. On startup, POSTs to the Orchestrator /agents/register with its identity
+     and container-internal ports.
+  2. Until the Orchestrator reports status RUNNING, the agent's chat and A2A
+     endpoints return HTTP 503 (agent-not-ready).
+  3. Once RUNNING, chat and A2A endpoints handle traffic.
+
+All outbound HTTP goes through Envoy via HTTP_PROXY (set in the container env),
+so A2A calls between agents are enforced by the Policy Processor in real time.
+
+This agent is intentionally dumb: chat returns a canned reply, A2A echoes
+the incoming message. Sprint 9 ships the Agent SDK in a sibling image
+(docker/Dockerfile.sdk-agent) for proper author-written agents; this module
+only proves the lifecycle + enforcement plumbing end-to-end.
+"""
+from __future__ import annotations
+
+# Apply SDK monkey-patches BEFORE the first `import openai` / `import anthropic`
+# anywhere in the process. sdk_patches reads AMAZE_PROXY / AMAZE_AGENT_ID
+# and rewrites each client's base_url + default headers so the agent author's
+# unmodified `openai.OpenAI()` is silently routed through Envoy → LiteLLM.
+import sdk_patches  # noqa: F401  (side-effect import: applies patches)
+
+import asyncio
+import json
+import os
+import threading
+import time
+import urllib.error
+import urllib.request
+from http import HTTPStatus
+
+import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+from mcp import McpError
+import openai
+import uvicorn
+
+
+AGENT_ID = os.environ["AMAZE_AGENT_ID"]
+CONTAINER_HOST = os.environ.get("AMAZE_CONTAINER_HOST", AGENT_ID)
+CHAT_PORT = int(os.environ.get("AMAZE_CHAT_PORT", "8080"))
+A2A_PORT = int(os.environ.get("AMAZE_A2A_PORT", "9002"))
+ORCHESTRATOR_URL = os.environ["AMAZE_ORCHESTRATOR_URL"].rstrip("/")
+
+# Envoy proxy is set via HTTP_PROXY/HTTPS_PROXY env — httpx picks this up
+# automatically. We read AMAZE_PROXY only for logging.
+AMAZE_PROXY = os.environ.get("AMAZE_PROXY", "")
+
+
+class AgentState:
+    """Simple lifecycle flag flipped by the registration loop."""
+
+    def __init__(self) -> None:
+        self.status = "PENDING"
+        self.ready_event = threading.Event()
+        # Slice 4 — A2A bearer token returned by the orchestrator at first
+        # registration (and replayed on restart). Kept in memory only; env
+        # vars are fixed at container-start, which is before registration.
+        self.a2a_token: str | None = None
+
+    def mark_running(self) -> None:
+        self.status = "RUNNING"
+        self.ready_event.set()
+
+
+state = AgentState()
+
+
+def register_and_poll() -> None:
+    """Background worker: register with orchestrator, then poll until RUNNING.
+
+    This is NOT done via HTTP_PROXY — the orchestrator is a control-plane
+    endpoint reachable directly on the NEMO network.
+    """
+    body = json.dumps(
+        {
+            "agent_id": AGENT_ID,
+            "host": CONTAINER_HOST,
+            "chat_port": CHAT_PORT,
+            "a2a_port": A2A_PORT,
+        }
+    ).encode()
+
+    # Retry registration in case the orchestrator isn't up yet.
+    for attempt in range(30):
+        try:
+            req = urllib.request.Request(
+                f"{ORCHESTRATOR_URL}/agents/register",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                payload = json.loads(resp.read())
+                # Store the bearer token before touching anything else so
+                # even synchronous code that triggers on RUNNING (e.g. a
+                # test immediately firing an A2A request) sees it.
+                if payload.get("a2a_token"):
+                    state.a2a_token = payload["a2a_token"]
+                # Don't log the raw token — print a redacted summary.
+                safe = {**payload, "a2a_token": "<redacted>"} if payload.get("a2a_token") else payload
+                print(f"[agent {AGENT_ID}] registered: {safe}", flush=True)
+                if payload.get("status") == "RUNNING":
+                    state.mark_running()
+                    return
+                break
+        except (urllib.error.URLError, ConnectionError) as e:
+            print(f"[agent {AGENT_ID}] register attempt {attempt+1} failed: {e}", flush=True)
+            time.sleep(2)
+    else:
+        print(f"[agent {AGENT_ID}] giving up on registration", flush=True)
+        return
+
+    # Poll status until RUNNING.
+    while True:
+        try:
+            with urllib.request.urlopen(
+                f"{ORCHESTRATOR_URL}/agents/{AGENT_ID}/status", timeout=3
+            ) as resp:
+                payload = json.loads(resp.read())
+                if payload.get("status") == "RUNNING":
+                    print(f"[agent {AGENT_ID}] policy received -> RUNNING", flush=True)
+                    state.mark_running()
+                    return
+        except Exception as e:
+            print(f"[agent {AGENT_ID}] status poll error: {e}", flush=True)
+        time.sleep(1)
+
+
+# ── Chat app (port 8080) ─────────────────────────────────────────────────────
+
+chat_app = FastAPI()
+
+
+@chat_app.post("/chat")
+async def chat(req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready", "reason": "awaiting-policy"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    msg = body.get("message", "")
+    reply = f"[{AGENT_ID}] received user message: {msg!r}"
+    return JSONResponse({"reply": reply})
+
+
+@chat_app.get("/healthz")
+async def chat_health() -> dict[str, str]:
+    return {"status": state.status, "agent_id": AGENT_ID}
+
+
+# ── A2A app (port 9002) ──────────────────────────────────────────────────────
+#
+# JSON-RPC 2.0 over HTTP, method "tasks/send". Shape matches
+# examples/agents/a2a/protocol.py so the existing A2A helpers work.
+
+a2a_app = FastAPI()
+
+
+@a2a_app.post("/")
+async def a2a(req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready", "reason": "awaiting-policy"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    rpc_id = body.get("id", "0")
+    method = body.get("method", "")
+    if method != "tasks/send":
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32601, "message": "method not supported"}},
+        )
+
+    params = body.get("params") or {}
+    message = params.get("message") or {}
+    parts = message.get("parts") or []
+    text = parts[0].get("text", "") if parts else ""
+
+    reply = f"[{AGENT_ID}] echo: {text}"
+    resp = {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {
+            "id": params.get("id", rpc_id),
+            "status": {"state": "completed"},
+            "artifacts": [{"parts": [{"type": "text", "text": reply}]}],
+        },
+    }
+    return JSONResponse(resp)
+
+
+# Client helper: send A2A message to another agent through Envoy.
+# Exposed on the chat app as /a2a-to/{target} for demo purposes (Phase 8A).
+
+@chat_app.post("/a2a-to/{target}")
+async def a2a_to(target: str, req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    text = body.get("message", "")
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "tasks/send",
+        "params": {
+            "id": "task-1",
+            "message": {"role": "user", "parts": [{"type": "text", "text": text}]},
+        },
+    }
+    # Envoy is the HTTP proxy (HTTP_PROXY env var); we hit the target agent by
+    # its A2A virtual-host known to Envoy: http://{target}:9002. Envoy runs
+    # ext_proc before routing, so Policy Processor sees caller/target even for
+    # non-routed targets and can deny with 403 before the upstream is tried.
+    envoy = os.environ.get("AMAZE_PROXY", "http://proxy:10000")
+    target_url = f"http://{target}:{A2A_PORT}/"
+    # Slice 4 — A2A identity travels as an A2A-spec Authorization: Bearer
+    # token. `x-agent-id` is deliberately NOT sent on A2A so the bearer is
+    # the sole source of truth; ext_proc's extractIDs prefers bearer over
+    # x-agent-id anyway, but leaving the header off makes the contract
+    # clear on the wire.
+    #
+    # Test harness can override / remove the Authorization header via the
+    # request body to exercise ST-8.8b (invalid bearer) and ST-8.8c
+    # (missing bearer) without a second helper endpoint.
+    override = body.get("auth_override") if isinstance(body, dict) else None
+    headers = {"Content-Type": "application/json"}
+    if override == "missing":
+        pass  # deliberately no Authorization header
+    elif isinstance(override, str) and override.startswith("Bearer "):
+        headers["Authorization"] = override
+    elif state.a2a_token:
+        headers["Authorization"] = f"Bearer {state.a2a_token}"
+    try:
+        async with httpx.AsyncClient(timeout=15, proxy=envoy) as client:
+            resp = await client.post(target_url, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        # Transport-level failure (DNS, proxy-connect, timeout). Distinct from
+        # an Envoy policy denial, which still returns a status_code.
+        return JSONResponse(
+            {"status_code": None, "error": f"{type(e).__name__}: {e}"},
+            status_code=200,
+        )
+    try:
+        body = resp.json()
+    except ValueError:
+        body = resp.text
+    return JSONResponse(
+        {"status_code": resp.status_code, "body": body},
+        status_code=200,
+    )
+
+
+# ── Cross-org A2A helper (Phase 8B Slice 5) ──────────────────────────────────
+#
+# POST /cross-org-a2a
+#   { "target": "https://partner-agent.example.com/a2a",
+#     "message": "...",
+#     "method": "tasks/send",          # optional, defaults to tasks/send
+#     "auth_override": "missing"|"Bearer ..." }  # optional, for tests
+#
+# The patched A2A SDK (future Sprint-9 work) will perform this rewrite
+# transparently on `https://` A2A URLs. For Phase 8B we demo the same
+# mechanics explicitly so the enforcement path is testable without
+# introducing the full Agent SDK first.
+#
+# Flow:
+#   1. Caller passes a full https:// URL. We rewrite scheme to http so
+#      httpx sends a plain proxy-mode HTTP request.
+#   2. HTTP_PROXY=envoy sends the request to Envoy. The Host is the
+#      *real* partner hostname (partner-agent.example.com), so Envoy's
+#      virtual host matches on that name and ext_proc sees it as the
+#      target. DecideA2A applies the allowlist against the FQDN literally.
+#   3. Envoy routes to the a2a_proxy sidecar. The sidecar reads the same
+#      Host header and TLS-dials the real partner.
+
+@chat_app.post("/cross-org-a2a")
+async def cross_org_a2a(req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    target_url_https: str = body.get("target") or ""
+    text: str = body.get("message") or ""
+    method: str = body.get("method") or "tasks/send"
+    override = body.get("auth_override")
+
+    if not target_url_https.startswith("https://"):
+        return JSONResponse(
+            {"ok": False, "error": "target must be https://"},
+            status_code=200,
+        )
+    target_url_http = "http://" + target_url_https[len("https://"):]
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": method,
+        "params": {
+            "id": "task-cross-org-1",
+            "message": {"role": "user", "parts": [{"type": "text", "text": text}]},
+        },
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if override == "missing":
+        pass
+    elif isinstance(override, str) and override.startswith("Bearer "):
+        headers["Authorization"] = override
+    elif state.a2a_token:
+        headers["Authorization"] = f"Bearer {state.a2a_token}"
+
+    envoy = os.environ.get("AMAZE_PROXY", "http://proxy:10000")
+    try:
+        async with httpx.AsyncClient(timeout=20, proxy=envoy) as client:
+            resp = await client.post(target_url_http, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        return JSONResponse(
+            {"status_code": None, "error": f"{type(e).__name__}: {e}"},
+            status_code=200,
+        )
+    try:
+        inner = resp.json()
+    except ValueError:
+        inner = resp.text
+    return JSONResponse(
+        {"status_code": resp.status_code, "body": inner},
+        status_code=200,
+    )
+
+
+# ── MCP client helper (Phase 8B Slice 2) ─────────────────────────────────────
+#
+# POST /mcp-call/{server}/{tool} { "arguments": {...} }
+#
+# Routes an MCP `tools/call` through Envoy (picked up via HTTP_PROXY env var
+# inside httpx.AsyncClient, trust_env defaults to True). The MCP streamable-http
+# session handshake (initialize, notifications/initialized) passes through the
+# Policy Processor as `protocol` methods; the `tools/call` step is what gets
+# enforced. A 403 from Envoy surfaces here as an exception — the endpoint never
+# raises, it always returns a structured JSON response so tests can assert on it.
+
+@chat_app.post("/mcp-call/{server}/{tool}")
+async def mcp_call(server: str, tool: str, req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    arguments = body.get("arguments") or {}
+
+    # Resolve host:port from the orchestrator registry instead of hard-coding
+    # :8000. Different MCPs can register on different ports; trust the source.
+    try:
+        async with httpx.AsyncClient(trust_env=False, timeout=3) as oc:
+            r = await oc.get(f"{ORCHESTRATOR_URL}/mcp")
+            r.raise_for_status()
+            entry = next(
+                (m for m in r.json().get("mcp_servers") or [] if m.get("mcp_id") == server),
+                None,
+            )
+    except httpx.HTTPError as e:
+        return JSONResponse(
+            {"ok": False, "error": f"registry lookup failed: {e}"},
+            status_code=200,
+        )
+    if entry is None:
+        return JSONResponse(
+            {"ok": False, "error": f"mcp {server!r} not in registry"},
+            status_code=200,
+        )
+    url = f"http://{entry['host']}:{entry['port']}/mcp/"
+
+    # Capture any 4xx/5xx body via an httpx response hook so the caller can
+    # assert on Envoy's deny reason. fastmcp/httpx closes streaming responses
+    # before our except block can aread() them; the hook runs while the
+    # response is still open, which is the only reliable window.
+    captured: dict[str, object] = {}
+
+    async def capture_error_body(resp: httpx.Response) -> None:
+        if resp.status_code >= 400:
+            try:
+                await resp.aread()
+                captured["status_code"] = resp.status_code
+                captured["body"] = resp.text
+            except Exception:
+                captured["status_code"] = resp.status_code
+
+    def client_factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+        follow_redirects: bool = True,
+    ) -> httpx.AsyncClient:
+        kwargs: dict = {
+            "follow_redirects": follow_redirects,
+            "event_hooks": {"response": [capture_error_body]},
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if headers is not None:
+            kwargs["headers"] = headers
+        if auth is not None:
+            kwargs["auth"] = auth
+        return httpx.AsyncClient(**kwargs)
+
+    transport = StreamableHttpTransport(
+        url,
+        headers={"x-agent-id": AGENT_ID},
+        httpx_client_factory=client_factory,
+    )
+
+    try:
+        async with Client(transport) as client:
+            result = await client.call_tool(tool, arguments)
+    except (httpx.HTTPError, McpError, RuntimeError) as e:
+        status_code = captured.get("status_code")
+        reason: str | None = None
+        raw = captured.get("body")
+        if isinstance(raw, str) and raw:
+            try:
+                body_json = json.loads(raw)
+                reason = body_json.get("reason") or body_json.get("error")
+            except Exception:
+                reason = raw[:200]
+        return JSONResponse(
+            {
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "status_code": status_code,
+                "reason": reason,
+            },
+            status_code=200,
+        )
+
+    content = []
+    for c in result.content or []:
+        text = getattr(c, "text", None)
+        content.append({"type": getattr(c, "type", "unknown"), "text": text})
+    return JSONResponse(
+        {
+            "ok": not result.is_error,
+            "is_error": bool(result.is_error),
+            "content": content,
+        },
+        status_code=200,
+    )
+
+
+# ── LLM client helper (Phase 8B Slice 3) ─────────────────────────────────────
+#
+# POST /llm-call { "model": "gpt-4o-mini", "prompt": "hello world" }
+#
+# Uses unmodified `openai.OpenAI()` — the patched SDK (sdk_patches)
+# silently rewrites base_url to AMAZE_PROXY and injects Host: litellm +
+# x-amaze-agent-id. Envoy sees the request/response plaintext and ext_proc
+# extracts usage.total_tokens, which shows up in /stats/agents/{id}.
+#
+# Always returns HTTP 200 with a structured JSON body so tests can assert on
+# policy denies (status_code=403 reason=llm-not-allowed) vs. token-cap denies
+# (429 reason=token-limit-exceeded) vs. success.
+
+@chat_app.post("/llm-call")
+async def llm_call(req: Request) -> JSONResponse:
+    if state.status != "RUNNING":
+        return JSONResponse(
+            {"error": "agent-not-ready"},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    body = await req.json()
+    model = body.get("model", "gpt-4o-mini")
+    prompt = body.get("prompt", "hello")
+
+    def _call_sync() -> dict:
+        client = openai.OpenAI()
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=32,
+            )
+        except openai.APIStatusError as e:
+            # Deny bodies come back as 4xx from Envoy. e.response.text has
+            # the JSON policy body ({"error":"denied","reason":"..."}).
+            reason: str | None = None
+            try:
+                reason = e.response.json().get("reason")
+            except Exception:
+                pass
+            return {
+                "ok": False,
+                "error_type": type(e).__name__,
+                "status_code": e.status_code,
+                "reason": reason,
+                "error": str(e),
+            }
+        except openai.APIError as e:
+            return {
+                "ok": False,
+                "error_type": type(e).__name__,
+                "status_code": None,
+                "reason": None,
+                "error": str(e),
+            }
+        text = ""
+        if resp.choices and resp.choices[0].message:
+            text = resp.choices[0].message.content or ""
+        tokens = resp.usage.total_tokens if resp.usage else 0
+        return {
+            "ok": True,
+            "text": text,
+            "tokens": tokens,
+            "model": resp.model,
+        }
+
+    # openai-python's sync client blocks — run in the default threadpool so
+    # the uvicorn event loop stays responsive.
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, _call_sync)
+    return JSONResponse(result)
+
+
+# ── Launcher ─────────────────────────────────────────────────────────────────
+
+def run_servers() -> None:
+    print(f"[agent {AGENT_ID}] starting chat:{CHAT_PORT} a2a:{A2A_PORT} proxy={AMAZE_PROXY}", flush=True)
+
+    async def _serve() -> None:
+        chat_config = uvicorn.Config(chat_app, host="0.0.0.0", port=CHAT_PORT, log_level="warning")
+        a2a_config = uvicorn.Config(a2a_app, host="0.0.0.0", port=A2A_PORT, log_level="warning")
+        chat_server = uvicorn.Server(chat_config)
+        a2a_server = uvicorn.Server(a2a_config)
+
+        chat_task = asyncio.create_task(chat_server.serve())
+        a2a_task = asyncio.create_task(a2a_server.serve())
+
+        # Don't start the register/poll loop until both sockets are accepting.
+        # Otherwise state can flip to RUNNING while the A2A port is still
+        # binding, and incoming A2A hits Envoy → upstream connect refused.
+        while not (chat_server.started and a2a_server.started):
+            await asyncio.sleep(0.05)
+        threading.Thread(target=register_and_poll, daemon=True).start()
+
+        await asyncio.gather(chat_task, a2a_task)
+
+    asyncio.run(_serve())
+
+
+if __name__ == "__main__":
+    run_servers()

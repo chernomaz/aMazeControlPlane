@@ -1,0 +1,31 @@
+# partner-agent — demo cross-org A2A endpoint for Sprint 8 Phase 8B Slice 5.
+#
+# Generates a self-signed TLS cert at build time with SAN
+# DNS:partner-agent.example.com so the a2a_proxy sidecar can dial
+# https://partner-agent.example.com/a2a and get a valid-looking
+# certificate (the proxy is run with A2A_PROXY_INSECURE_TLS=true in the
+# demo; prod would mount the partner's real CA bundle instead).
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "fastapi==0.115.0" \
+    "uvicorn[standard]==0.35.0"
+
+# Generate self-signed cert once, at build time. ECDSA P-256 keeps the
+# cert small. The SAN is what matters — CN is legacy.
+RUN mkdir -p /certs && \
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+        -days 3650 -nodes \
+        -keyout /certs/partner.key \
+        -out /certs/partner.crt \
+        -subj "/CN=partner-agent.example.com" \
+        -addext "subjectAltName=DNS:partner-agent.example.com"
+
+WORKDIR /app
+COPY docker/partner_agent/main.py /app/main.py
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 443
+CMD ["python", "/app/main.py"]

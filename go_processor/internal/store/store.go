@@ -20,6 +20,7 @@ type AgentPolicy struct {
 	AllowedRemoteAgents []string            `yaml:"allowed_remote_agents"`
 	AllowedMCPServers   []string            `yaml:"allowed_mcp_servers"`
 	AllowedTools        map[string][]string `yaml:"allowed_tools"`
+	AllowedLLMs         []string            `yaml:"allowed_llms"`
 	Limits              *Limits             `yaml:"limits"`
 }
 

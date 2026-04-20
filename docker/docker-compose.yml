@@ -1,0 +1,285 @@
+# docker-compose for the aMaze substrate stack (Sprint 8+).
+#
+# Start:   docker compose -f docker/docker-compose.yml up -d --build
+# Stop:    docker compose -f docker/docker-compose.yml down
+#
+# Services:
+#   orchestrator     — registration + policy push + chat relay (:7000)
+#   policy-processor — Go ext_proc server (:50051) + stats (:8081) + config (:8082)
+#   envoy            — forward proxy (:10000) + admin (:9901)
+#   agent-a, agent-b — agent containers registering with the orchestrator
+#   mcp-5-tools      — MCP server NEMO container (Phase 8B Slice 1)
+#   litellm          — HTTPS terminator for LLM traffic (Phase 8B Slice 3)
+#   a2a-proxy        — HTTPS terminator for cross-org A2A (Phase 8B Slice 5)
+#   partner-agent    — fake cross-org A2A endpoint (Phase 8B Slice 5)
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.orchestrator
+    container_name: amaze-orchestrator
+    environment:
+      ORCH_ADDR: ":7000"
+      POLICY_PROCESSOR_CONFIG_URL: "http://policy-processor:8082"
+    ports:
+      - "7000:7000"
+    networks:
+      - amaze-net
+    depends_on:
+      - policy-processor
+
+  policy-processor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.policy-processor
+    container_name: amaze-policy-processor
+    environment:
+      POLICY_PATH: ":empty:"
+      POLICY_PROCESSOR_PORT: "50051"
+      STATS_ADDR: ":8081"
+      CONFIG_ADDR: ":8082"
+    # 8081 (stats) and 8082 (config) are unauthenticated admin surfaces.
+    # Bound to 127.0.0.1 so only the host running compose can hit them;
+    # in-cluster services reach them via the service DNS name.
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+    networks:
+      - amaze-net
+
+  envoy:
+    image: envoyproxy/envoy:v1.32.0
+    container_name: amaze-envoy
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warning"]
+    volumes:
+      - ../envoy/envoy.nemo.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "10000:10000"
+      - "9901:9901"
+    networks:
+      - amaze-net
+    depends_on:
+      - policy-processor
+
+  agent-a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: agent-a
+    environment:
+      AMAZE_AGENT_ID: "agent-a"
+      AMAZE_CONTAINER_HOST: "agent-a"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      # `envoy` in NO_PROXY: the patched openai SDK already points base_url at
+      # envoy:10000 as origin. Without this entry httpx would use HTTP_PROXY
+      # (also envoy:10000) and send a proxy-style request that Envoy would
+      # route by its URI authority instead of the injected Host: litellm.
+      NO_PROXY: "orchestrator,policy-processor,envoy,localhost,127.0.0.1"
+    # Chat port exposed for system tests that drive the agent directly;
+    # A2A port (9002) is NOT exposed — all A2A must go through Envoy.
+    ports:
+      - "18080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+      - litellm
+      - a2a-proxy
+      - partner-agent
+
+  # LiteLLM sidecar — Phase 8B Slice 3. Terminates HTTPS for the real LLM
+  # providers so Envoy sees plaintext request/response bodies. The agent's
+  # patched openai/anthropic SDK sends plain HTTP through Envoy with
+  # Host: litellm; Envoy forwards here; LiteLLM opens TLS to api.openai.com
+  # (or anthropic, etc.). Port is NOT exposed — all traffic must route via
+  # Envoy so ext_proc enforces policy + records tokens.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: amaze-litellm
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    # Provider API keys come from the repo-root .env (gitignored). Only the
+    # LiteLLM container needs these — agents authenticate via x-agent-id
+    # and never see the raw provider keys.
+    env_file:
+      - ../.env
+    networks:
+      - amaze-net
+
+  mcp-5-tools:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    container_name: mcp-5-tools
+    # Slice 2 — web_search tool needs TAVILY_API_KEY. The repo-root .env is
+    # gitignored; env_file makes compose inject its keys as container env.
+    env_file:
+      - ../.env
+    environment:
+      AMAZE_MCP_ID: "mcp-5-tools"
+      AMAZE_CONTAINER_HOST: "mcp-5-tools"
+      AMAZE_MCP_PORT: "8000"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+    # MCP port NOT exposed to the host — Slice 2 routes MCP traffic through
+    # Envoy like A2A, so the tool-call path is policy-enforced.
+    # on-failure restart lets docker/mcp_entrypoint.py exit on registration failure
+    # (see fail_fatal) and get rescued instead of leaking a zombie MCP.
+    restart: on-failure
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+
+  # a2a_proxy sidecar — Phase 8B Slice 5. Symmetric to LiteLLM, but for
+  # cross-org A2A over HTTPS: terminates outbound TLS so Envoy sees the
+  # JSON-RPC body and can enforce method / size / identity policy on the
+  # wire. Not exposed to the host — all traffic flows agent → Envoy → here.
+  a2a-proxy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.a2a-proxy
+    container_name: amaze-a2a-proxy
+    environment:
+      A2A_PROXY_ADDR: ":8082"
+      # Defence-in-depth allowlist. ext_proc is the primary enforcer; this
+      # list just caps which partner hostnames the sidecar will TLS-dial.
+      ALLOWED_PARTNERS: "partner-agent.example.com"
+      # Demo partner uses a self-signed cert generated at build time.
+      # Prod would mount the partner's CA bundle and set this to false.
+      A2A_PROXY_INSECURE_TLS: "true"
+    networks:
+      - amaze-net
+
+  # partner-agent — fake cross-org A2A endpoint. Network alias gives it
+  # the partner-agent.example.com DNS name on the compose network so the
+  # a2a_proxy can dial it by its real public hostname.
+  partner-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.partner-agent
+    container_name: partner-agent
+    networks:
+      amaze-net:
+        aliases:
+          - partner-agent.example.com
+
+  # SDK agents — Sprint 9. Three flavours of `amaze.init()`-based agents:
+  #   sdk-agent-a   — sync handlers; demo ST-9.1/2/3/5/6-sync
+  #   sdk-agent-b   — async handlers; demo ST-9.5-callee + ST-9.6-async
+  #   sdk-agent-llm — LangChain / OpenAI (via LiteLLM); demo ST-9.4
+  sdk-agent-a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sdk-agent
+      args:
+        USER_AGENT: sdk_agent_a
+    container_name: sdk-agent-a
+    environment:
+      AMAZE_AGENT_ID: "sdk-agent-a"
+      AMAZE_CONTAINER_HOST: "sdk-agent-a"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      AMAZE_SUB_AGENT: "sdk-agent-b"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,envoy,localhost,127.0.0.1"
+    ports:
+      - "38080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+
+  sdk-agent-b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sdk-agent
+      args:
+        USER_AGENT: sdk_agent_b
+    container_name: sdk-agent-b
+    environment:
+      AMAZE_AGENT_ID: "sdk-agent-b"
+      AMAZE_CONTAINER_HOST: "sdk-agent-b"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,envoy,localhost,127.0.0.1"
+    ports:
+      - "48080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+
+  sdk-agent-llm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sdk-agent
+      args:
+        USER_AGENT: sdk_agent_llm
+    container_name: sdk-agent-llm
+    env_file:
+      - ../.env
+    environment:
+      AMAZE_AGENT_ID: "sdk-agent-llm"
+      AMAZE_CONTAINER_HOST: "sdk-agent-llm"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,envoy,localhost,127.0.0.1"
+    ports:
+      - "58080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+      - litellm
+
+  agent-b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: agent-b
+    environment:
+      AMAZE_AGENT_ID: "agent-b"
+      AMAZE_CONTAINER_HOST: "agent-b"
+      AMAZE_CHAT_PORT: "8080"
+      AMAZE_A2A_PORT: "9002"
+      AMAZE_ORCHESTRATOR_URL: "http://orchestrator:7000"
+      AMAZE_PROXY: "http://envoy:10000"
+      HTTP_PROXY: "http://envoy:10000"
+      HTTPS_PROXY: "http://envoy:10000"
+      NO_PROXY: "orchestrator,policy-processor,envoy,localhost,127.0.0.1"
+    ports:
+      - "28080:8080"
+    networks:
+      - amaze-net
+    depends_on:
+      - orchestrator
+      - envoy
+      - litellm
+      - a2a-proxy
+      - partner-agent
+
+networks:
+  amaze-net:
+    driver: bridge

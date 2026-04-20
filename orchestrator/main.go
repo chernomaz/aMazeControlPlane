@@ -13,6 +13,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -157,6 +159,50 @@ func (r *MCPRegistry) List() []*MCPServer {
 	return out
 }
 
+// tokenStore — Slice 4 — holds the A2A bearer token minted for each agent.
+// Orchestrator mints one 32-byte random token on first register, caches it
+// in memory, and pushes it to the Policy Processor so ext_proc can resolve
+// `Authorization: Bearer <token>` → agent_id before enforcement runs.
+//
+// On container restart we replay the cached token so the agent's in-memory
+// token reference stays valid across restarts without admin intervention.
+type tokenStore struct {
+	mu     sync.RWMutex
+	tokens map[string]string // agent_id -> opaque token
+}
+
+func newTokenStore() *tokenStore {
+	return &tokenStore{tokens: map[string]string{}}
+}
+
+// GetOrCreate returns the cached token for agentID, minting a fresh random
+// one on first call. The returned bool is true iff a new token was minted
+// (so the caller knows to push it downstream).
+func (t *tokenStore) GetOrCreate(agentID string) (token string, minted bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if tok, ok := t.tokens[agentID]; ok {
+		return tok, false
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand can't realistically fail on Linux; fall back to
+		// time-based noise if it ever does. Safer than panicking the
+		// whole orchestrator on a transient kernel error.
+		return fmt.Sprintf("fallback-%d-%s", time.Now().UnixNano(), agentID), true
+	}
+	tok := hex.EncodeToString(buf)
+	t.tokens[agentID] = tok
+	return tok, true
+}
+
+func (t *tokenStore) Get(agentID string) (string, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	tok, ok := t.tokens[agentID]
+	return tok, ok
+}
+
 // policyStore caches YAML policy documents pushed by the admin, keyed by agent_id.
 // On container restart, the orchestrator re-plays the cached policy to the Policy
 // Processor so the agent goes straight to RUNNING without admin intervention.
@@ -188,6 +234,7 @@ type Server struct {
 	reg             *Registry
 	mcp             *MCPRegistry
 	pol             *policyStore
+	tok             *tokenStore
 	policyProcessor string // e.g. http://policy-processor:8082
 	staticDir       string
 }
@@ -201,6 +248,7 @@ func main() {
 		reg:             NewRegistry(),
 		mcp:             NewMCPRegistry(),
 		pol:             newPolicyStore(),
+		tok:             newTokenStore(),
 		policyProcessor: ppURL,
 		staticDir:       staticDir,
 	}
@@ -233,8 +281,9 @@ type registerRequest struct {
 }
 
 type registerResponse struct {
-	AgentID string `json:"agent_id"`
-	Status  string `json:"status"`
+	AgentID  string `json:"agent_id"`
+	Status   string `json:"status"`
+	A2AToken string `json:"a2a_token"`
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -265,6 +314,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		Labels:   req.Labels,
 	}
 
+	// Slice 4 — mint (or replay) the A2A bearer token before anything
+	// else so the Policy Processor learns about it before the agent makes
+	// its first outbound A2A call. The token is returned to the container
+	// in the register response so the agent can inject it as
+	// `Authorization: Bearer <token>` on outbound A2A requests.
+	token, _ := s.tok.GetOrCreate(req.AgentID)
+	if err := s.pushTokenToProcessor(req.AgentID, token); err != nil {
+		// A failed token push leaves the processor without the mapping,
+		// which makes every A2A request from this agent resolve to
+		// bearerInvalid. Flag it hard — the container can retry register
+		// or the operator can inspect logs.
+		log.Printf("[orchestrator] token push for %s failed: %v", req.AgentID, err)
+	}
+
 	// Fast path: if the admin already pushed a policy for this agent (container
 	// restart case), replay it immediately and return RUNNING so the container
 	// skips the wait loop.
@@ -280,7 +343,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Re-read (Upsert may have merged onto an existing record)
 	a, _ := s.reg.Get(req.AgentID)
-	writeJSON(w, registerResponse{AgentID: a.ID, Status: a.Status})
+	writeJSON(w, registerResponse{AgentID: a.ID, Status: a.Status, A2AToken: token})
 }
 
 // ── listing / status ─────────────────────────────────────────────────────────
@@ -389,6 +452,27 @@ func (s *Server) handlePutPolicy(w http.ResponseWriter, r *http.Request) {
 	s.reg.SetStatus(id, statusRunning)
 
 	writeJSON(w, map[string]string{"agent_id": id, "status": statusRunning})
+}
+
+func (s *Server) pushTokenToProcessor(agentID, token string) error {
+	url := fmt.Sprintf("%s/config/tokens/%s", s.policyProcessor, agentID)
+	body, _ := json.Marshal(map[string]string{"token": token})
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
 }
 
 func (s *Server) pushPolicyToProcessor(agentID string, yamlBody []byte) error {

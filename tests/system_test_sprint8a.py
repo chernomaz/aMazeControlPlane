@@ -222,7 +222,7 @@ def st_8_10() -> None:
     """Container restart — orchestrator re-plays cached policy; skips PENDING."""
     try:
         subprocess.check_call(
-            ["docker", "restart", "nemo-agent-a"],
+            ["docker", "restart", "agent-a"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

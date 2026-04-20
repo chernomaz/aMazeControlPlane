@@ -105,7 +105,7 @@ def st_8_11() -> None:
         report("ST-8.11 MCP registers once", False, "mcp-5-tools disappeared on re-read")
         return
 
-    running = container_running("nemo-mcp-5-tools")
+    running = container_running("mcp-5-tools")
     once = entry2.get("registered_at") == t0
 
     ok = (

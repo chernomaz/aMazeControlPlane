@@ -1,0 +1,47 @@
+# SDK-agent container image — Sprint 9.
+#
+# Runs an author-written agent module from `examples/agents/` using the
+# `amaze` Python SDK for A2A server lifecycle + outbound A2A. LLM and MCP
+# traffic go through the Sprint-8 patched SDKs (sdk_patches/), which are
+# auto-imported by `amaze/__init__.py`.
+#
+# The user module is selected at build time via `USER_AGENT` (default
+# sdk_agent_a). Change per service in docker-compose.yml.
+FROM python:3.12-slim
+
+ARG USER_AGENT=sdk_agent_a
+ENV USER_AGENT=${USER_AGENT}
+
+# Core runtime for the SDK + patched providers. Langchain stack is pulled
+# in so the ST-9.4 `sdk_agent_llm` module works without a second image
+# build path — ~50 MB extra, fine for dev.
+# langchain 1.2 needs openai>=2.26 (new langchain-openai pins it); Dockerfile.agent
+# (Sprint 8) is on openai 1.60.2 which predates that. The two images are
+# independent, so the version skew is fine — they never share a process.
+RUN pip install --no-cache-dir \
+    "fastapi==0.115.0" \
+    "uvicorn[standard]==0.35.0" \
+    "httpx==0.28.1" \
+    "openai==2.30.0" \
+    "langchain==1.2.15" \
+    "langchain-openai==1.1.12" \
+    "python-dotenv==1.1.0"
+
+WORKDIR /app
+
+# SDK, sdk_patches, and the agent module sources all land under /app so
+# PYTHONPATH can pick them up in one shot. `agents` is a plain directory
+# of .py files, one per demo agent — selected at `CMD` time.
+COPY sdk/amaze /app/amaze
+COPY sdk_patches /app/sdk_patches
+COPY examples/agents /app/agents
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+EXPOSE 8080 9002
+
+# `exec` + `-u` so Python receives SIGTERM directly and flushes stdout.
+# Script form (not `-m`) because examples/agents/ is a flat directory of
+# standalone files, not a Python package.
+CMD ["sh", "-c", "exec python -u /app/agents/${USER_AGENT}.py"]

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"amaze/go_processor/internal/store"
+	"amaze/go_processor/internal/tokens"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +25,11 @@ func StartConfigHTTP(addr string) {
 	mux.HandleFunc("GET /config/agents/{id}", handleGetAgent)
 	mux.HandleFunc("PUT /config/agents/{id}", handlePutAgent)
 	mux.HandleFunc("DELETE /config/agents/{id}", handleDeleteAgent)
+	// Slice 4 — A2A bearer tokens. Orchestrator mints a random token per
+	// agent on first register and PUTs it here so ext_proc can resolve
+	// Authorization: Bearer <token> → agent_id before enforcement.
+	mux.HandleFunc("PUT /config/tokens/{id}", handlePutToken)
+	mux.HandleFunc("DELETE /config/tokens/{id}", handleDeleteToken)
 	go func() {
 		if err := http.ListenAndServe(addr, mux); err != nil {
 			fmt.Fprintf(os.Stderr, "[config-api] failed on %s: %v\n", addr, err)
@@ -79,5 +85,36 @@ func handlePutAgent(w http.ResponseWriter, r *http.Request) {
 func handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	store.Get().Delete(id)
+	writeJSON(w, map[string]any{"status": "ok", "agent_id": id})
+}
+
+// handlePutToken accepts JSON {"token": "<opaque-string>"}. The raw token is
+// stored verbatim in the reverse-lookup map; callers are responsible for
+// picking something high-entropy (Orchestrator uses crypto/rand 32 bytes).
+func handlePutToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing agent id", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		http.Error(w, fmt.Sprintf("invalid json: %v", err), http.StatusBadRequest)
+		return
+	}
+	if body.Token == "" {
+		http.Error(w, "missing token", http.StatusBadRequest)
+		return
+	}
+	tokens.Get().Put(id, body.Token)
+	writeJSON(w, map[string]any{"status": "ok", "agent_id": id})
+}
+
+func handleDeleteToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tokens.Get().Delete(id)
 	writeJSON(w, map[string]any{"status": "ok", "agent_id": id})
 }

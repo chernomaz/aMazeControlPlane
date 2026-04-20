@@ -1,6 +1,6 @@
-# MCP-server NEMO container image — Phase 8B Slice 1.
+# MCP-server container image — Phase 8B Slice 1.
 #
-# Wraps examples/mcp_server/ (fastmcp + web_search tool) in the NEMO lifecycle:
+# Wraps examples/mcp_server/ (fastmcp + web_search tool) in the aMaze lifecycle:
 # single-shot registration with the Orchestrator, then `mcp.run()` on 0.0.0.0.
 FROM python:3.12-slim
 
@@ -17,11 +17,11 @@ RUN pip install --no-cache-dir \
     "python-dotenv==1.1.0"
 
 WORKDIR /app
-COPY docker/nemo_mcp.py /app/nemo_mcp.py
+COPY docker/mcp_entrypoint.py /app/mcp_entrypoint.py
 COPY examples/mcp_server /app/mcp_server
 
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["python", "/app/nemo_mcp.py"]
+CMD ["python", "/app/mcp_entrypoint.py"]
