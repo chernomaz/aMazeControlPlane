@@ -38,6 +38,53 @@ class Config:
 _config = Config()
 
 
+def _install_httpx_bearer_injector() -> None:
+    """Patch httpx.Client / AsyncClient so every outbound request carries
+    `X-Amaze-Bearer` automatically.
+
+    The hook reads `_config.bearer_token` at REQUEST TIME (not patch
+    time), so installing the patch before registration is safe — the
+    header becomes available as soon as the background thread completes.
+    Idempotent via a module-level sentinel.
+    """
+    try:
+        import httpx  # noqa: WPS433 — optional runtime dep
+    except ImportError:
+        return
+
+    if getattr(httpx, "_amaze_patched", False):
+        return
+
+    def _inject_sync(request: "httpx.Request") -> None:
+        with _config._lock:
+            token = _config.bearer_token
+        if token:
+            request.headers["X-Amaze-Bearer"] = token
+
+    async def _inject_async(request: "httpx.Request") -> None:
+        with _config._lock:
+            token = _config.bearer_token
+        if token:
+            request.headers["X-Amaze-Bearer"] = token
+
+    def _wrap(cls, hook):
+        orig = cls.__init__
+
+        def _init(self, *args, **kwargs):
+            hooks = kwargs.get("event_hooks") or {}
+            req_hooks = list(hooks.get("request") or [])
+            req_hooks.append(hook)
+            hooks["request"] = req_hooks
+            kwargs["event_hooks"] = hooks
+            orig(self, *args, **kwargs)
+
+        cls.__init__ = _init
+
+    _wrap(httpx.Client, _inject_sync)
+    _wrap(httpx.AsyncClient, _inject_async)
+    httpx._amaze_patched = True  # type: ignore[attr-defined]
+
+
 def load(agent_id_override: str | None = None) -> Config:
     """Populate the module-level Config from env vars. Idempotent.
 
@@ -60,6 +107,16 @@ def load(agent_id_override: str | None = None) -> Config:
     _config.chat_port = int(os.environ.get("AMAZE_CHAT_PORT", "8080"))
     _config.a2a_port = int(os.environ.get("AMAZE_A2A_PORT", "9002"))
     return _config
+
+
+# Install the httpx bearer injector at IMPORT time, not just at init().
+# Reason: agents commonly write `llm = ChatOpenAI(...)` at module-load —
+# which causes the openai SDK to construct its httpx client before
+# amaze.init() runs. If we wait until init(), the openai SDK's client is
+# already built without our event hook. Patching the class at import
+# catches every client, including the one openai builds lazily on first
+# call.
+_install_httpx_bearer_injector()
 
 
 def cfg() -> Config:

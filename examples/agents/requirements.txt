@@ -13,11 +13,14 @@ httpx>=0.27,<1
 python-dotenv>=1.0,<2
 
 # --- LangChain + LangChain-OpenAI + tool plumbing ---
-langchain>=0.3,<1
-langchain-openai>=0.2,<1
-langchain-core>=0.3,<1
-langchain-community>=0.3,<1
-langchain-mcp-adapters>=0.0.3
+# langchain >=1.0 is required for `create_agent` (used by agent_sdk*.py);
+# earlier 0.3.x betas only expose `create_react_agent` under
+# langgraph.prebuilt.
+langchain>=1.0
+langchain-openai>=1.0
+langchain-core>=1.0
+langchain-community>=0.3
+langchain-mcp-adapters>=0.1
 
 # --- observability (optional, agent_sdk*.py imports langsmith) ---
 langsmith>=0.1

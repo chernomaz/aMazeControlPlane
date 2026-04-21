@@ -43,6 +43,9 @@ services:
   agent-sdk:
     <<: *agent-defaults
     container_name: agent-sdk
+    networks:
+      - amaze-agent-net   # talks to proxy + peer agents (internal)
+      - amaze-frontend    # host-reachable for user-facing /chat
     build:
       context: ..
       dockerfile: examples/agents/Dockerfile

@@ -76,14 +76,15 @@ async def send_async(target: str, message: str) -> str:
         },
     }
     headers = {"Content-Type": "application/json"}
-    # A2A identity travels as `Authorization: Bearer`. The bearer is populated
-    # by _core.register_and_wait — if it isn't set yet we fail loudly rather
-    # than let the request slip through and get denied as `invalid-bearer`.
+    # A2A identity travels as `X-Amaze-Bearer` — a dedicated header so it
+    # never collides with the upstream's own `Authorization` (OpenAI API
+    # key, Anthropic x-api-key, etc.). The bearer is populated by
+    # _core.register_and_wait — if it isn't set yet we fail loudly.
     with c._lock:
         token = c.bearer_token
     if not token:
         raise SendError(0, "no-bearer", "SDK registered without a bearer token")
-    headers["Authorization"] = f"Bearer {token}"
+    headers["X-Amaze-Bearer"] = token
 
     async with httpx.AsyncClient(timeout=30, proxy=c.proxy_url) as client:
         resp = await client.post(url, json=payload, headers=headers)

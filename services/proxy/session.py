@@ -50,18 +50,23 @@ class SessionIdentity:
 
     async def request(self, flow: http.HTTPFlow) -> None:
         # Strip spoofed headers first — regardless of what happens next, the
-        # value an agent might have set must never reach the upstream.
+        # value an agent might have set must never reach the upstream. Both
+        # the caller id and our own bearer header are consumed here and
+        # never forwarded.
         flow.request.headers.pop("x-amaze-caller", None)
+        # Note: X-Amaze-Bearer is read below; stripped after resolution so
+        # it never reaches the upstream API.
 
         if flow.request.host in _BEARER_BYPASS_HOSTS:
             flow.metadata["amaze_bypass"] = True
             return
 
-        auth = flow.request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            deny(flow, "invalid-bearer")
-            return
-        token = auth.removeprefix("Bearer ").strip()
+        # Our identity header is X-Amaze-Bearer — NOT Authorization. Reason:
+        # Authorization is reserved by the LLM/MCP provider itself (OpenAI's
+        # API key, Anthropic's x-api-key, etc.). Using a dedicated header
+        # means the proxy can resolve caller identity without conflicting
+        # with the agent's own auth to the upstream.
+        token = flow.request.headers.get("X-Amaze-Bearer", "").strip()
         if not token:
             deny(flow, "invalid-bearer")
             return
@@ -78,3 +83,5 @@ class SessionIdentity:
             return
 
         flow.metadata["amaze_agent"] = agent_id
+        # Strip the bearer before forwarding — upstream never sees it.
+        flow.request.headers.pop("X-Amaze-Bearer", None)
