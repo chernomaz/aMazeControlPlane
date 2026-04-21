@@ -29,7 +29,7 @@ services:
   amaze:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: Dockerfile
     container_name: amaze-platform
     networks:
       - amaze-agent-net
