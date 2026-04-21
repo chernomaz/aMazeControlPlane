@@ -15,11 +15,12 @@ RUN pip install --no-cache-dir -r /mcp/requirements.txt
 
 COPY examples/mcp_server/ /mcp/
 
-# Runtime cert bundle — see note in agents/Dockerfile. Set after pip
-# install so the build itself can verify TLS against pypi.
-ENV SSL_CERT_FILE=/etc/amaze/ca/mitmproxy-ca-cert.pem \
-    REQUESTS_CA_BUNDLE=/etc/amaze/ca/mitmproxy-ca-cert.pem \
-    HOST=0.0.0.0 \
+# No SSL_CERT_FILE override — MCP tools reach the public internet
+# directly (e.g. api.tavily.com) and must trust real public CAs. The
+# mitmproxy CA is NOT needed here: incoming agent→MCP traffic is
+# server-accepted TCP (no client-cert verification on our end); MCP
+# outbound bypasses our proxy in step 1.
+ENV HOST=0.0.0.0 \
     PORT=8000
 
 EXPOSE 8000

@@ -54,9 +54,14 @@ async def _build_agent():
                 model=llm,
                 tools=tools,
                 system_prompt=(
+                    # Tight steering: this agent is the user-facing planner.
+                    # Use web_search only if the question needs external
+                    # facts; otherwise answer from general knowledge. Do NOT
+                    # call any other tool — the proxy will deny non-allowed
+                    # tool calls and the task will fail.
                     "You are a helpful research assistant. "
-                    "Use pdf_search for local PDFs. "
-                    "Use web_search for external info. "
+                    "Use the web_search tool ONLY when you need up-to-date "
+                    "external facts. Do not call any other tool. "
                     "Always cite sources."
                 ),
             )
