@@ -117,5 +117,6 @@ load_tools()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    logger.info("Starting MCP server on port %d", port, extra={"trace_id": "-"})
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
+    host = os.environ.get("HOST", "0.0.0.0")
+    logger.info("Starting MCP server on %s:%d", host, port, extra={"trace_id": "-"})
+    mcp.run(transport="streamable-http", host=host, port=port)

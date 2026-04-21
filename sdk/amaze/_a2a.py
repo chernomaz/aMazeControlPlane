@@ -76,12 +76,11 @@ async def send_async(target: str, message: str) -> str:
         },
     }
     headers = {"Content-Type": "application/json"}
-    # Slice-4 contract: A2A identity travels as `Authorization: Bearer`, no
-    # x-agent-id. The bearer is populated by _core.register_and_wait — if it
-    # isn't set yet we fail loudly rather than let the request slip through
-    # and get denied as `missing-bearer`.
+    # A2A identity travels as `Authorization: Bearer`. The bearer is populated
+    # by _core.register_and_wait — if it isn't set yet we fail loudly rather
+    # than let the request slip through and get denied as `invalid-bearer`.
     with c._lock:
-        token = c.a2a_token
+        token = c.bearer_token
     if not token:
         raise SendError(0, "no-bearer", "SDK registered without a bearer token")
     headers["Authorization"] = f"Bearer {token}"

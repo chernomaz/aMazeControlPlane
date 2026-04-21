@@ -1,8 +1,10 @@
 # Dependencies for the three demo agents (agent_sdk.py, agent_sdk1.py,
 # agent_sdk2.py). Baked into the agent container image at build time.
 
-# --- aMaze SDK (local, editable install) ---
--e ../../sdk
+# The aMaze SDK (sdk/ package) is installed by the Dockerfile as a separate
+# step so that a single shared build context at the repo root can reach
+# both the SDK and the agent code. Keep it out of this file — editable
+# installs with relative paths don't survive a `docker build`.
 
 # --- web framework for the /invoke + /chat handlers ---
 fastapi>=0.115,<1

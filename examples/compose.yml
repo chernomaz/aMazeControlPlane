@@ -1,0 +1,103 @@
+# User-facing demo: three agents + one MCP sibling. Layered ON TOP of the
+# platform compose files:
+#
+#   cd /path/to/newAmazeControlPlane/aMaze
+#   docker compose \
+#     -f docker/docker-compose.yml \
+#     -f docker/compose.networks.yml \
+#     -f examples/compose.yml \
+#     up --build
+#
+# Demo flow matches SPRINTS.md ST-S1.10 / .11 / .12 — POST to agent-sdk:
+#   curl -XPOST http://localhost:8080/chat -d '{"message":"search for current bitcoin price"}'
+#
+# Every sibling attaches to the internal net (no direct internet), mounts
+# the proxy CA read-only, and has HTTP_PROXY forced to the platform's
+# mitmproxy endpoint.
+
+name: amaze
+
+x-agent-defaults: &agent-defaults
+  build:
+    context: ..
+    dockerfile: examples/agents/Dockerfile
+  networks:
+    - amaze-agent-net
+  restart: unless-stopped
+  depends_on:
+    amaze:
+      condition: service_started
+  volumes:
+    - amaze-proxy-ca:/etc/amaze/ca:ro
+  environment: &agent-env
+    HTTP_PROXY: http://amaze:8080
+    HTTPS_PROXY: http://amaze:8080
+    NO_PROXY: amaze
+    AMAZE_ORCHESTRATOR_URL: http://amaze:8001
+    AMAZE_PROXY_URL: http://amaze:8080
+    OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+services:
+
+  # ── Agents ─────────────────────────────────────────────────────────────
+  agent-sdk:
+    <<: *agent-defaults
+    container_name: agent-sdk
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk
+    ports:
+      - "8080:8080"     # user-facing /chat
+
+  agent-sdk1:
+    <<: *agent-defaults
+    container_name: agent-sdk1
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk1
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk1
+
+  agent-sdk2:
+    <<: *agent-defaults
+    container_name: agent-sdk2
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk2
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk2
+
+  # ── MCP server ─────────────────────────────────────────────────────────
+  demo-mcp:
+    build:
+      context: ..
+      dockerfile: examples/mcp_server/Dockerfile
+    container_name: demo-mcp
+    networks:
+      - amaze-mcp-net
+    restart: unless-stopped
+    depends_on:
+      amaze:
+        condition: service_started
+    volumes:
+      - amaze-proxy-ca:/etc/amaze/ca:ro
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      # MCP tools that hit external APIs (web_search via Tavily) also go
+      # through the platform proxy.
+      HTTP_PROXY: http://amaze:8080
+      HTTPS_PROXY: http://amaze:8080
+      NO_PROXY: amaze
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
