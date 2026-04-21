@@ -1,0 +1,22 @@
+# Optional MCP-server pre-declarations. MCPs can also self-register at
+# runtime via POST /register?kind=mcp — that path is the production mechanism.
+# Entries here bootstrap the resolver so demos work without a registration
+# call. If an MCP self-registers with the same name, the dynamic entry
+# overrides the YAML one.
+#
+# Fields:
+#   url   — where the proxy forwards allowed traffic after policy check.
+#           Can be a Docker DNS name (compose service) or an IP.
+#   tools — advertised tool list. Used by /resolve/mcp/{name} callers; the
+#           actual runtime tool list comes from the MCP's `tools/list`
+#           response on first contact.
+
+mcp_servers:
+  demo-mcp:
+    url: http://demo-mcp:8000/mcp/
+    tools:
+      - web_search
+      - dummy_email
+      - file_read
+      - pdf_search
+      - sql_query

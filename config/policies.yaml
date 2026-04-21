@@ -1,0 +1,63 @@
+# Per-agent policies. Primary config file.
+#
+# Key = agent_id (claimed by the agent at POST /register). The keyset is the
+# implicit allowlist: an agent registering under an id without an entry here
+# will have every request denied with reason `policy-not-found`.
+#
+# Policy fields:
+#   allowed_remote_agents  — A2A allowlist (which peers this agent may call).
+#   allowed_mcp_servers    — MCP-server allowlist (which servers this agent
+#                            may reach at all — tools/list, tools/call, etc.).
+#   allowed_tools          — Per-server, which tools may be INVOKED. Tool
+#                            discovery (`tools/list`) is governed by
+#                            allowed_mcp_servers; tool invocation requires
+#                            the tool to be named here too.
+#   allowed_llms           — LLM provider + model allowlist (matched against
+#                            the upstream Host by the policy addon).
+#   limits                 — soft + hard caps (tokens/min, request size, ...).
+
+policies:
+
+  agent-sdk:
+    # agent-sdk is the user-facing planner: routes to agent-sdk1 (bitcoin
+    # path) or agent-sdk2 (everything else) after an LLM classification call.
+    allowed_remote_agents: [agent-sdk1, agent-sdk2]
+    allowed_mcp_servers:   [demo-mcp]
+    allowed_tools:
+      # agent-sdk loads MCP tools at startup (MultiServerMCPClient.get_tools)
+      # but does not invoke them itself. Keeping web_search here is a no-op
+      # for traffic; it just keeps the handshake consistent with the other
+      # agents.
+      demo-mcp: [web_search]
+    allowed_llms:
+      - provider: openai
+        models: [gpt-4.1-mini]
+    limits:
+      max_tokens_per_minute: 20000
+      max_request_size_bytes: 262144
+
+  agent-sdk1:
+    # Bitcoin cascade: LLM-only, no tools, no outbound A2A.
+    allowed_remote_agents: []
+    allowed_mcp_servers:   [demo-mcp]
+    allowed_tools:
+      demo-mcp: [web_search]
+    allowed_llms:
+      - provider: openai
+        models: [gpt-4.1-mini]
+    limits:
+      max_tokens_per_minute: 10000
+
+  agent-sdk2:
+    # Weather / generic cascade. Allowed to invoke web_search.
+    # dummy_email is deliberately OMITTED — this is what makes ST-S1.12
+    # (Integration — NY news) deny.
+    allowed_remote_agents: []
+    allowed_mcp_servers:   [demo-mcp]
+    allowed_tools:
+      demo-mcp: [web_search]
+    allowed_llms:
+      - provider: openai
+        models: [gpt-4.1-mini]
+    limits:
+      max_tokens_per_minute: 10000
