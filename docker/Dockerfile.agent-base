@@ -1,0 +1,29 @@
+# Base image for aMaze agent containers.
+#
+# Usage:
+#   FROM amaze/agent-base:dev
+#   COPY . /agent
+#   CMD ["python", "/agent/main.py"]
+#
+# What the Orchestrator injects at spawn time (agent code sets none of these):
+#   - HTTP_PROXY / HTTPS_PROXY   → force every outbound call through the proxy.
+#   - AMAZE_SESSION_ID / AMAZE_AGENT_ID / AMAZE_SESSION_TOKEN
+#   - Named volume `amaze-proxy-ca` mounted read-only at /etc/amaze/ca/ — contains
+#     mitmproxy-ca-cert.pem written by the proxy on first boot.
+#
+# Because ALL outbound TLS is re-signed by mitmproxy, agents only need to trust
+# that one CA. No system-CA merging; no update-ca-certificates. SSL_CERT_FILE
+# and REQUESTS_CA_BUNDLE point directly at the mounted cert — this works under
+# read-only rootfs because nothing is written.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    SSL_CERT_FILE=/etc/amaze/ca/mitmproxy-ca-cert.pem \
+    REQUESTS_CA_BUNDLE=/etc/amaze/ca/mitmproxy-ca-cert.pem
+
+WORKDIR /agent
+
+EXPOSE 8090

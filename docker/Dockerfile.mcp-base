@@ -1,0 +1,27 @@
+# Base image for aMaze MCP-server containers.
+#
+# Usage:
+#   FROM amaze/mcp-base:dev
+#   COPY . /mcp
+#   CMD ["python", "/mcp/server.py"]
+#
+# MCP servers are on `amaze-mcp-net` (internal=true). The proxy is the only
+# node that straddles agent-net and mcp-net — agents reach MCP strictly via
+# the proxy, where the policy addon enforces the allowlist.
+#
+# MCP code is operator-written (trusted), but we keep the same read-only +
+# cap_drop + tmpfs profile as a defense-in-depth layer. MCP servers that
+# need to hit external APIs (e.g. web_search) go through the same proxy as
+# agents — HTTP_PROXY / HTTPS_PROXY are set by the Orchestrator at spawn.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    SSL_CERT_FILE=/etc/amaze/ca/mitmproxy-ca-cert.pem \
+    REQUESTS_CA_BUNDLE=/etc/amaze/ca/mitmproxy-ca-cert.pem
+
+WORKDIR /mcp
+
+EXPOSE 8080

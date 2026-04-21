@@ -1,0 +1,64 @@
+# Top-level compose for the single-container aMaze platform + its siblings.
+#
+# What runs where:
+#
+#   amaze (this container)              — redis + registry + orchestrator + proxy
+#                                         under supervisord. Straddles
+#                                         agent-net, mcp-net, egress.
+#
+#   agent containers (spawned dynamic)  — live on amaze-agent-net only.
+#                                         Spawned by Orchestrator via the host
+#                                         Docker socket.
+#
+#   MCP containers (spawned dynamic)    — live on amaze-mcp-net only. Same
+#                                         spawn path, kind=mcp.
+#
+# The proxy is the only node with a route to the public internet and the only
+# node that can cross from agent-net to mcp-net.
+#
+# Compose with networks:
+#   docker compose -f docker/docker-compose.yml -f docker/compose.networks.yml up
+
+name: amaze
+
+services:
+  amaze:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: amaze-platform
+    networks:
+      - amaze-agent-net
+      - amaze-mcp-net
+      - amaze-egress
+    ports:
+      # API gateway (orchestrator HTTP, session create, stats) — step 1 we
+      # expose only what's needed to demo.
+      - "8001:8001"     # orchestrator
+      - "8002:8002"     # registry
+      # Proxy is reachable by agents over the internal net by DNS name `amaze`.
+      # No need to expose 8080 to the host.
+    volumes:
+      # Named volume for the mitmproxy CA. Written inside the proxy process at
+      # /opt/mitmproxy on first boot; mounted read-only into every spawned
+      # sibling at /etc/amaze/ca (see docker/container_spawn.py).
+      - amaze-proxy-ca:/opt/mitmproxy
+      # Redis AOF.
+      - amaze-redis-data:/data/redis
+      # Host Docker socket — Orchestrator needs this to spawn sibling
+      # containers. Keep read-write (Docker API requires it); treat the
+      # Orchestrator as a privileged component inside the platform container.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      AMAZE_PROXY_URL: http://amaze:8080
+      AMAZE_AGENT_NETWORK: amaze_amaze-agent-net
+      AMAZE_MCP_NETWORK: amaze_amaze-mcp-net
+      AMAZE_PROXY_CA_VOLUME: amaze-proxy-ca
+    restart: unless-stopped
+
+volumes:
+  amaze-proxy-ca:
+  amaze-redis-data:
+
+# Networks are defined in docker/compose.networks.yml. Compose them together
+# at `docker compose up` time.

@@ -1,0 +1,24 @@
+# Dependencies for the three demo agents (agent_sdk.py, agent_sdk1.py,
+# agent_sdk2.py). Baked into the agent container image at build time.
+
+# --- aMaze SDK (local, editable install) ---
+-e ../../sdk
+
+# --- web framework for the /invoke + /chat handlers ---
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+httpx>=0.27,<1
+python-dotenv>=1.0,<2
+
+# --- LangChain + LangChain-OpenAI + tool plumbing ---
+langchain>=0.3,<1
+langchain-openai>=0.2,<1
+langchain-core>=0.3,<1
+langchain-community>=0.3,<1
+langchain-mcp-adapters>=0.0.3
+
+# --- observability (optional, agent_sdk*.py imports langsmith) ---
+langsmith>=0.1
+
+# --- OpenAI SDK (langchain-openai pulls it transitively; pinned for clarity) ---
+openai>=1.54

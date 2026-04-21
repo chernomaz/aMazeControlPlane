@@ -1,0 +1,18 @@
+# Platform container deps (proxy + orchestrator + shared).
+# Agents and MCP servers run in their own sibling containers with their
+# own requirements files under examples/.
+
+# --- proxy ---
+mitmproxy>=11.0,<12
+cryptography>=43
+
+# --- orchestrator (HTTP + Docker socket + YAML config loader) ---
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+pyyaml>=6.0,<7
+docker>=7.1,<8
+
+# --- shared ---
+redis[hiredis]>=5.2,<6
+httpx[http2]>=0.27,<1
+pydantic>=2.9,<3
