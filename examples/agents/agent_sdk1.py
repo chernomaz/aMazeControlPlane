@@ -44,9 +44,8 @@ async def _build_agent():
             client = MultiServerMCPClient(
                 {
                     "tools": {
-                        "url": "http://mcp-5-tools:8000/mcp/",
+                        "url": "http://demo-mcp:8000/mcp/",
                         "transport": "streamable_http",
-                        "headers": {"x-agent-id": os.environ["AMAZE_AGENT_ID"]},
                     }
                 }
             )

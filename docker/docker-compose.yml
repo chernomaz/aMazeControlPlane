@@ -1,22 +1,26 @@
-# Top-level compose for the single-container aMaze platform + its siblings.
+# Top-level compose for the single-container aMaze platform.
 #
 # What runs where:
 #
-#   amaze (this container)              — redis + registry + orchestrator + proxy
-#                                         under supervisord. Straddles
-#                                         agent-net, mcp-net, egress.
+#   amaze (this container)    — redis + orchestrator + proxy under supervisord.
+#                               Straddles agent-net, mcp-net, egress.
 #
-#   agent containers (spawned dynamic)  — live on amaze-agent-net only.
-#                                         Spawned by Orchestrator via the host
-#                                         Docker socket.
+#   agent containers          — user-started, outside our control. Must attach
+#                               to amaze-agent-net and call POST /register on
+#                               the orchestrator at boot to obtain a bearer
+#                               token. See docker/Dockerfile.agent-base for a
+#                               ready-made base image.
 #
-#   MCP containers (spawned dynamic)    — live on amaze-mcp-net only. Same
-#                                         spawn path, kind=mcp.
+#   MCP containers            — same model. Attach to amaze-mcp-net, call
+#                               POST /register?kind=mcp on the orchestrator to
+#                               announce name + tool list. See
+#                               docker/Dockerfile.mcp-base.
 #
-# The proxy is the only node with a route to the public internet and the only
-# node that can cross from agent-net to mcp-net.
+# The proxy is the only node that can cross from agent-net to mcp-net and the
+# only node with a route to the public internet. Orchestrator does NOT spawn
+# sibling containers — no Docker socket mount is needed or wanted.
 #
-# Compose with networks:
+# Compose with the network definitions:
 #   docker compose -f docker/docker-compose.yml -f docker/compose.networks.yml up
 
 name: amaze
@@ -32,27 +36,20 @@ services:
       - amaze-mcp-net
       - amaze-egress
     ports:
-      # API gateway (orchestrator HTTP, session create, stats) — step 1 we
-      # expose only what's needed to demo.
-      - "8001:8001"     # orchestrator
-      - "8002:8002"     # registry
-      # Proxy is reachable by agents over the internal net by DNS name `amaze`.
-      # No need to expose 8080 to the host.
+      # Orchestrator HTTP: POST /register, GET /resolve/*, stats endpoints.
+      - "8001:8001"
+      # Proxy is reachable by siblings over the internal nets by DNS name
+      # `amaze`. Not exposed to the host.
     volumes:
-      # Named volume for the mitmproxy CA. Written inside the proxy process at
-      # /opt/mitmproxy on first boot; mounted read-only into every spawned
-      # sibling at /etc/amaze/ca (see docker/container_spawn.py).
+      # Named volume for the mitmproxy CA. Written inside the proxy process
+      # at /opt/mitmproxy on first boot; user-started sibling containers
+      # mount this volume read-only at /etc/amaze/ca so they trust the
+      # proxy's re-signed certs.
       - amaze-proxy-ca:/opt/mitmproxy
       # Redis AOF.
       - amaze-redis-data:/data/redis
-      # Host Docker socket — Orchestrator needs this to spawn sibling
-      # containers. Keep read-write (Docker API requires it); treat the
-      # Orchestrator as a privileged component inside the platform container.
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       AMAZE_PROXY_URL: http://amaze:8080
-      AMAZE_AGENT_NETWORK: amaze_amaze-agent-net
-      AMAZE_MCP_NETWORK: amaze_amaze-mcp-net
       AMAZE_PROXY_CA_VOLUME: amaze-proxy-ca
     restart: unless-stopped
 

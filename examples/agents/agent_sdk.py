@@ -40,15 +40,12 @@ async def _build_agent():
             client = MultiServerMCPClient(
                 {
                     "tools": {
-                        # `127.0.0.1:8000` → compose service DNS name; the
-                        # MCP server is reachable via Envoy from the amaze-net.
-                        # `x-agent-id` header is required: we don't monkey-patch
-                        # the mcp SDK (only openai + anthropic in Sprint 8),
-                        # so the caller identity has to be set explicitly for
-                        # ext_proc to run DecideMCP with the right agent_id.
-                        "url": "http://mcp-5-tools:8000/mcp/",
+                        # Hostname `demo-mcp` is the registered MCP name. The
+                        # proxy (HTTP_PROXY is set for us) reads the Host, runs
+                        # the policy addon against the agent's allowlist, and
+                        # forwards to the registered MCP URL on allow.
+                        "url": "http://demo-mcp:8000/mcp/",
                         "transport": "streamable_http",
-                        "headers": {"x-agent-id": os.environ["AMAZE_AGENT_ID"]},
                     }
                 }
             )

@@ -33,12 +33,6 @@ llm = ChatOpenAI(
 # Lazy-build: policy isn't pushed at module-import time, so the MCP
 # handshake would fail. First inbound call (from agent-sdk via A2A)
 # triggers the build; subsequent calls reuse the cached agent.
-#
-# agent-sdk2 hits a DIFFERENT MCP server than agent-sdk / agent-sdk1 —
-# `mcp-tools-2`, deployed as its own container on amaze-net. The image
-# can be the same (it's the same Python MCP server code), the service
-# is different so policies can allow/deny each server independently.
-# Envoy routes `Host: mcp-tools-2` to its own cluster.
 _agent = None
 _agent_lock = asyncio.Lock()
 
@@ -51,9 +45,8 @@ async def _build_agent():
             client = MultiServerMCPClient(
                 {
                     "tools": {
-                        "url": "http://mcp-tools-2:8000/mcp/",
+                        "url": "http://demo-mcp:8000/mcp/",
                         "transport": "streamable_http",
-                        "headers": {"x-agent-id": os.environ["AMAZE_AGENT_ID"]},
                     }
                 }
             )

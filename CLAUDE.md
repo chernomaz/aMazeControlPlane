@@ -74,57 +74,87 @@ Running processes (supervisord, one container):
 | Process | Port | Role |
 |---|---|---|
 | redis | 6379 | session state, counters, bearer tokens |
-| orchestrator | 8001 | session lifecycle + Docker spawn + MCP/agent resolver (absorbs what aMaze called "registry") |
+| orchestrator | 8001 | registration + session tracking + MCP/agent resolver |
 | proxy | 8080 | mitmproxy + policy-enforcement addon |
 
-The orchestrator owns both container lifecycle and name resolution:
-`GET /resolve/mcp/{name}` → MCP server URL + tool list (read from
-`config/mcp_servers.yaml` at boot); `GET /resolve/agent/{session_id}/{agent_id}` →
-live agent container URL (written in-memory by the spawn path).
+The orchestrator is passive — it does NOT spawn sibling containers. Agents
+and MCP servers are user-started (docker run, compose, k8s — framework
+consumer's choice). They register themselves on boot:
+
+- `POST /register` (kind=agent): body `{agent_id}`. Returns
+  `{session_id, bearer_token}`. Registration is always accepted; enforcement
+  happens at traffic time against `policies.yaml` (see §8).
+- `POST /register?kind=mcp`: body `{name, url, tools: [...]}`. Registers an
+  MCP server and its tool list. Proxy's router queries the resolver to find
+  `name → url` at request time.
+- `GET /resolve/mcp/{name}` → `{url, tools}`.
+- `GET /resolve/agent/{session_id}/{agent_id}` → live agent URL (used for
+  A2A routing).
 
 ---
 
 ## 5. Config (step 1)
 
-Three YAMLs under `config/`, loaded at boot:
+Two YAMLs under `config/`, loaded at boot:
 
-- `policies.yaml` — per-agent `allowed_remote_agents`, `allowed_mcp_servers`,
-  `allowed_tools`, `allowed_llms`, `limits`.
-- `agents.yaml` — image, policy ref, env, command per agent.
-- `mcp_servers.yaml` — name → URL + tool list.
+- `policies.yaml` — primary config. Key is `agent_id`. Value: per-agent
+  `allowed_remote_agents`, `allowed_mcp_servers`, `allowed_tools`,
+  `allowed_llms`, `limits`. The keyset is the implicit allowlist — if an
+  agent registers under an `agent_id` that has no entry here, every one of
+  its requests is denied (fail-closed `policy-not-found`).
+- `mcp_servers.yaml` — optional MCP pre-declarations. Bootstraps the
+  resolver with well-known MCP endpoints; MCPs can also register
+  dynamically at boot via `POST /register?kind=mcp`.
 
-Reload requires proxy restart (step 1 simplification; dynamic reload is a
-later sprint).
+No separate `agents.yaml` — agent identity + policy mapping live entirely
+in `policies.yaml`. Reload requires orchestrator+proxy restart (step 1
+simplification; dynamic reload is a later sprint).
 
 ---
 
 ## 6. Identity
 
-- Every session gets a bearer token from Orchestrator at session-create.
-- Agent containers receive the token in `AMAZE_SESSION_TOKEN` env.
-- SDK attaches `Authorization: Bearer <token>` on every outbound request.
-- Proxy resolves the token against Redis (`session_token:{token}` →
-  `agent_id`), STRIPS any client-supplied `x-amaze-caller`, then INJECTS the
-  trusted `x-amaze-caller: <agent_id>` header before forwarding.
-- Receiving SDK reads only the injected header — never `params.from` or
-  any other client-controlled field. This is the spoof-proof identity
-  invariant (cf. the Sprint 9 fix in the predecessor repo).
+- Agent container boots → SDK calls `POST /register {agent_id}` on the
+  orchestrator → orchestrator issues a bearer token and writes
+  `session_token:{token} → agent_id` to Redis.
+- SDK stores the token and attaches `Authorization: Bearer <token>` on
+  every outbound request.
+- Proxy resolves the token (Redis lookup), STRIPS any client-supplied
+  `x-amaze-caller` header, and INJECTS the trusted `x-amaze-caller:
+  <agent_id>` before forwarding.
+- Receiving SDK (for A2A) reads only the injected header — never
+  `params.from` or any other client-controlled field. This is the
+  spoof-proof identity invariant (cf. the Sprint 9 fix in the predecessor
+  repo).
+
+**Security note.** In step 1 registration is open — any client reaching
+the orchestrator can claim any `agent_id`. This is contained by the
+fail-closed policy lookup (§5): registering as an `agent_id` not in
+`policies.yaml` yields 403 on every subsequent request. Pre-shared secrets
+or mTLS on `/register` is a later-sprint hardening item.
 
 ---
 
 ## 7. Container Isolation
 
-Agent containers are spawned with:
+Agents and MCP servers are user-started, not spawned by us. The framework
+consumer is responsible for attaching their containers to the right
+network and mounting the proxy CA volume. What we provide:
 
-- `network=amaze-agent-net` (internal=true — no default route).
-- `HTTP_PROXY` / `HTTPS_PROXY` → proxy URL.
-- `cap_drop=[ALL]`, `security_opt=[no-new-privileges]`.
-- `read_only=True`, `tmpfs=/tmp (noexec,nosuid)`.
-- `mem_limit`, `pids_limit=512`, `cpu_quota`.
-- Proxy MITM CA mounted read-only at
-  `/usr/local/share/ca-certificates/amaze-proxy.crt`.
+- `docker/Dockerfile.agent-base` — base image with `SSL_CERT_FILE` +
+  `REQUESTS_CA_BUNDLE` pre-set to the mounted CA path.
+- `docker/Dockerfile.mcp-base` — same, for MCP servers.
+- `docker/compose.networks.yml` — network definitions (agent-net and
+  mcp-net are `internal: true`, guaranteeing proxy-only egress).
+- Named volume `amaze-proxy-ca` — the proxy writes its MITM CA there on
+  first boot; siblings mount it read-only at `/etc/amaze/ca`.
 
-See `docker/container_spawn.py` and `docker/compose.networks.yml`.
+Recommended `docker run` / compose flags for user-started agents (aMaze
+defense-in-depth profile):
+`cap_drop=[ALL]`, `security_opt=[no-new-privileges]`, `read_only=true`,
+`tmpfs=/tmp (noexec,nosuid)`, `mem_limit`, `pids_limit=512`. These are
+suggested, not enforced by us — since we don't spawn, we can't require
+them.
 
 ---
 
@@ -133,10 +163,11 @@ See `docker/container_spawn.py` and `docker/compose.networks.yml`.
 | Condition | Action |
 |---|---|
 | Policy addon raises | DENY (fail closed) |
+| Agent registered but no policy entry | DENY `policy-not-found` |
 | Unknown bearer token | DENY `invalid-bearer` |
 | Unknown target agent | DENY `not-allowed` |
-| Unknown MCP server | DENY `mcp-not-allowed` |
-| Unknown MCP tool | DENY `tool-not-allowed` |
+| Unknown MCP server (not registered) | DENY `mcp-not-allowed` |
+| Unknown MCP tool (server OK, tool not allowed) | DENY `tool-not-allowed` |
 | Redis unavailable | DENY (503) |
 | Malformed request | DENY |
 
