@@ -4,6 +4,32 @@ Running log. Newest at top.
 
 ---
 
+## 2026-04-22 — Sprint S1 code review + fix pass (commit bc8ce48)
+
+Code-reviewed every file landed in S1; applied 5 critical + 4 should-fix.
+
+| # | Where | Fix |
+|---|---|---|
+| C1 | `services/proxy/session.py` | Strip `X-Amaze-Bearer` on ALL paths including bypass |
+| C2 | `services/orchestrator/main.py` | Migrate to FastAPI `lifespan` (deprecation) |
+| C3 | `services/proxy/enforcer.py` | `_lookup_mcp` fail-closed on Redis error (was silently returning None → wrong reason code) |
+| C4 | `sdk/amaze/_core.py` | Catch `HTTPError` before `URLError` — don't retry 4xx/5xx |
+| C5 | `docker/container_spawn.py` | CA mount: switched from broken bind-mount to named volume |
+| S1 | `services/proxy/counters.py` | `session_id` stashed in flow.metadata; one fewer Redis round-trip per request |
+| S2 | `services/proxy/_redis.py` (new) | Single shared async Redis client |
+| S3 | `services/orchestrator/main.py` | `/resolve/mcp` 503 on RedisError (not bare 500) |
+| S4 | `Dockerfile` + `supervisord.conf` + `entrypoint.sh` | Non-root `amaze` user (uid 1000); entrypoint chowns volumes on boot |
+
+Nits deferred (documented): no HEALTHCHECK, `pretty_host` vs `host`,
+`LLM_HOSTS` hardcoded, SSE token counter blind spot, `urllib` vs `httpx`
+in register path.
+
+Regression: all three integration tests (ST-S1.10/.11/.12) green on the
+fixed stack. Bitcoin LLM chain, weather via Tavily `web_search`, NY-news
+`dummy_email` denial — all working end-to-end.
+
+---
+
 ## 2026-04-21 — Sprint S1 all integration tests green with real LLM + MCP
 
 With `.env` populated from `aMazeControlPlane/.env` (OPENAI_API_KEY,
