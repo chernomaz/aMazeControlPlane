@@ -2,77 +2,67 @@
 Session-identity addon.
 
 Runs FIRST on every request:
-  1. Reads `Authorization: Bearer <token>`.
-  2. Resolves `session_token:{token}` → agent_id in Redis.
-  3. Writes agent_id into `flow.metadata["amaze_agent"]` for downstream addons.
-  4. Strips any client-supplied `x-amaze-caller` header (spoof-prevention).
-     The trusted value is injected later by the enforcer addon on allow.
+  1. Unconditionally strips client-supplied `x-amaze-caller` AND
+     `X-Amaze-Bearer` from the outbound headers — neither may ever leave
+     the proxy. The bearer is read into a local variable BEFORE the
+     strip so we still see it for the lookup below.
+  2. If the Host is in the bypass set (e.g. `amaze` for orchestrator
+     `/register` calls) marks the flow and returns.
+  3. Resolves `session_token:{token}` → agent_id in Redis.
+  4. Also fetches `agent_session:{agent_id}` so downstream addons can
+     attribute counters to a session without a second round-trip.
+  5. Stashes both in `flow.metadata` as `amaze_agent` and `amaze_session`.
 
-Any failure path denies the request with a stable `reason` code:
-  - no `Authorization` header / not `Bearer …` → `invalid-bearer`
-  - bearer doesn't resolve in Redis              → `invalid-bearer`
-  - Redis unreachable                            → `redis-unavailable` (503)
-  - anything else                                → `internal-error`
-
-Bearer check is skipped for requests to the orchestrator itself (so
-`POST /register` doesn't require a bearer). The orchestrator is reachable
-only over the internal network, so this is not a public surface.
+Failure paths deny with stable reason codes:
+  - missing bearer / not resolvable  → 403 `invalid-bearer`
+  - Redis unreachable                → 503 `redis-unavailable`
 """
 from __future__ import annotations
 
 import logging
-import os
 
 import redis.asyncio as redis
 from mitmproxy import http
 
+from services.proxy._redis import client as redis_client
 from services.proxy.deny import deny
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
-
-# Hostnames that bypass bearer resolution. The orchestrator self-registration
-# surface is reachable by siblings at `http://amaze:8001/register` — no bearer
-# available yet (the agent hasn't registered). Also exclude mitmproxy's own
-# internal URL.
-_BEARER_BYPASS_HOSTS: set[str] = {"amaze"}
+# Hostnames that bypass bearer resolution. `amaze` is the compose DNS name
+# for the platform container — siblings hit `http://amaze:8001/register`
+# before they have a bearer. Internal-only net; not a public surface.
+_BEARER_BYPASS_HOSTS: frozenset[str] = frozenset({"amaze"})
 
 
 class SessionIdentity:
-    def __init__(self) -> None:
-        self._redis: redis.Redis | None = None
-
-    async def _r(self) -> redis.Redis:
-        if self._redis is None:
-            self._redis = redis.from_url(REDIS_URL, decode_responses=True)
-        return self._redis
-
     async def request(self, flow: http.HTTPFlow) -> None:
-        # Strip spoofed headers first — regardless of what happens next, the
-        # value an agent might have set must never reach the upstream. Both
-        # the caller id and our own bearer header are consumed here and
-        # never forwarded.
+        # Capture bearer BEFORE stripping so we can still resolve it.
+        bearer = flow.request.headers.get("X-Amaze-Bearer", "").strip()
+
+        # Unconditional scrub — upstream NEVER sees these, regardless of
+        # which branch we exit on. Covers C1 (bearer leak on bypass path)
+        # and the pre-existing x-amaze-caller spoof-prevention.
         flow.request.headers.pop("x-amaze-caller", None)
-        # Note: X-Amaze-Bearer is read below; stripped after resolution so
-        # it never reaches the upstream API.
+        flow.request.headers.pop("X-Amaze-Bearer", None)
 
         if flow.request.host in _BEARER_BYPASS_HOSTS:
             flow.metadata["amaze_bypass"] = True
             return
 
-        # Our identity header is X-Amaze-Bearer — NOT Authorization. Reason:
-        # Authorization is reserved by the LLM/MCP provider itself (OpenAI's
-        # API key, Anthropic's x-api-key, etc.). Using a dedicated header
-        # means the proxy can resolve caller identity without conflicting
-        # with the agent's own auth to the upstream.
-        token = flow.request.headers.get("X-Amaze-Bearer", "").strip()
-        if not token:
+        if not bearer:
             deny(flow, "invalid-bearer")
             return
 
         try:
-            agent_id = await (await self._r()).get(f"session_token:{token}")
+            r = await redis_client()
+            # One pipeline: token→agent + agent→session. Saves a round-trip
+            # later (S1 — counters would otherwise do the second GET again).
+            pipe = r.pipeline()
+            pipe.get(f"session_token:{bearer}")
+            # The agent_id-keyed lookup needs the resolved agent_id — we
+            # can't pipeline both since the second depends on the first.
+            agent_id = (await pipe.execute())[0]
         except redis.RedisError as e:
             logger.error("redis unreachable during bearer lookup: %s", e)
             deny(flow, "redis-unavailable", status=503)
@@ -82,6 +72,17 @@ class SessionIdentity:
             deny(flow, "invalid-bearer")
             return
 
+        try:
+            session_id = await (await redis_client()).get(
+                f"agent_session:{agent_id}"
+            )
+        except redis.RedisError as e:
+            logger.error("redis unreachable during session lookup: %s", e)
+            deny(flow, "redis-unavailable", status=503)
+            return
+
         flow.metadata["amaze_agent"] = agent_id
-        # Strip the bearer before forwarding — upstream never sees it.
-        flow.request.headers.pop("X-Amaze-Bearer", None)
+        # session_id can legitimately be None if the TTL has expired — we
+        # still allow the request (bearer is the auth), but counters skip
+        # the session-keyed writes.
+        flow.metadata["amaze_session"] = session_id

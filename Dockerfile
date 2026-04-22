@@ -35,11 +35,21 @@ COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
 COPY docker/entrypoint.sh    /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# --- Non-root user --------------------------------------------------------
+# Orchestrator, proxy and redis all run as `amaze` (uid 1000) — supervisord
+# stays root so it can drop privileges per program and write to the shared
+# log dir. Dropping root is defense-in-depth: a compromised addon/process
+# can't escape to the container filesystem or tamper with other programs'
+# state under /data.
+RUN groupadd --system amaze \
+ && useradd --system --gid amaze --uid 1000 --home /app --shell /bin/sh amaze
+
 # --- Runtime layout -------------------------------------------------------
 # Data dirs for redis AOF + mitmproxy CA. These are declared as VOLUMEs so
 # that named volumes (declared in docker/docker-compose.yml) can persist
-# state across container restarts.
-RUN mkdir -p /data/redis /opt/mitmproxy /var/log/amaze
+# state across container restarts. Ownership handed to the amaze user.
+RUN mkdir -p /data/redis /opt/mitmproxy /var/log/amaze \
+ && chown -R amaze:amaze /data /opt/mitmproxy /var/log/amaze /app
 VOLUME ["/data/redis", "/opt/mitmproxy"]
 
 ENV HOME=/opt/mitmproxy

@@ -12,34 +12,25 @@ Redis keys written:
   agent:{agent_id}:total_requests          INCR      grand total, all sessions
   agent:{agent_id}:total_llm_tokens        INCRBY    grand total tokens
 
-`session_id` is derived from the bearer — the lookup is
-`agent_session:{agent_id}` in Redis, which the orchestrator set at
-registration. If it's missing (expired session), counters are skipped — a
-missing metric is preferable to a false-increment on someone else's session.
+The session id is read from `flow.metadata["amaze_session"]` — set once by
+the SessionIdentity addon. Previously this module re-fetched
+`agent_session:{agent_id}` per request, which was two extra Redis round-
+trips on the hot path.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 
 import redis.asyncio as redis
 from mitmproxy import http
 
-logger = logging.getLogger(__name__)
+from services.proxy._redis import client as redis_client
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+logger = logging.getLogger(__name__)
 
 
 class Counters:
-    def __init__(self) -> None:
-        self._redis: redis.Redis | None = None
-
-    async def _r(self) -> redis.Redis:
-        if self._redis is None:
-            self._redis = redis.from_url(REDIS_URL, decode_responses=True)
-        return self._redis
-
     # --- request-side counters: only count what was ALLOWED ---------------
 
     async def request(self, flow: http.HTTPFlow) -> None:
@@ -53,8 +44,8 @@ class Counters:
         if kind is None:
             return
 
-        r = await self._r()
-        sid = await r.get(f"agent_session:{agent_id}")
+        sid = flow.metadata.get("amaze_session")
+        r = await redis_client()
         pipe = r.pipeline()
         pipe.incr(f"agent:{agent_id}:total_requests")
 
@@ -93,8 +84,8 @@ class Counters:
         if tokens is None:
             return
 
-        r = await self._r()
-        sid = await r.get(f"agent_session:{agent_id}")
+        sid = flow.metadata.get("amaze_session")
+        r = await redis_client()
         pipe = r.pipeline()
         pipe.incrby(f"agent:{agent_id}:total_llm_tokens", tokens)
         if sid:

@@ -4,6 +4,51 @@ Running log. Newest at top.
 
 ---
 
+## 2026-04-21 — Sprint S1 all integration tests green with real LLM + MCP
+
+With `.env` populated from `aMazeControlPlane/.env` (OPENAI_API_KEY,
+TAVILY_API_KEY), the three integration tests pass end-to-end on live
+containers. Summary of the live runs:
+
+| Test | Prompt | Result |
+|---|---|---|
+| ST-S1.10 | "search for current bitcoin price" | 200, agent-sdk → LLM → A2A agent-sdk1 → LLM → reply |
+| ST-S1.11 | "search for current weather in London" | 200, real Tavily `web_search`: *sunny 12.2°C, wind ENE 12.3 mph, humidity 35%* |
+| ST-S1.12 | "email me the current NEW YORK news" | Proxy 403 `tool-not-allowed` on `dummy_email`; caller sees TaskGroup error (spec-expected) |
+
+Redis counters populated (`redis-cli --scan --pattern 'agent:*' 'session:*'`):
+`agent:agent-sdk:total_llm_tokens=3208`, `agent:agent-sdk2:total_llm_tokens=1839`,
+per-session MCP tool call counts, bearer TTLs all OK.
+
+**Fixes required to get here (on top of layer 1–4 scaffold):**
+
+| Problem | Fix |
+|---|---|
+| `docker compose --env-file` not passed → `OPENAI_API_KEY` blank | Always invoke compose with `--env-file .env` (compose's default looks for `.env` next to the base compose file, not repo root) |
+| `demo-mcp` outbound Tavily call denied by proxy — no bearer | Drop `HTTP_PROXY` env from `demo-mcp`; attach to `amaze-egress`. Step 1 scope: proxy governs agent→MCP, not MCP→public-internet |
+| `demo-mcp` TLS verify fails against real CAs | Dropped `SSL_CERT_FILE` override from `Dockerfile.mcp-base` — MCP needs the system Debian CA bundle, not our mitmproxy CA (outbound doesn't traverse our proxy) |
+| agent-sdk1 inherited a "if bitcoin rewrite to dogecoin + get carol email" guard → LLM tried `dummy_email` → 403 loop | Removed the guard; agent-sdk1 is now a clean terminal LLM hop |
+| LLM picked non-allowlisted MCP tools from the full advertised list | Tightened both agents' system prompts: "Use web_search tool ONLY when needed; do not call any other tool" |
+
+**Atomic tests** (ST-S1.1 through ST-S1.9) all green except ST-S1.6 —
+implementation returns `host-not-allowed` where the spec asks for
+`mcp-not-allowed` on unknown servers. Noted for a post-demo triage.
+
+**End-of-sprint commit log:**
+```
+57b317c  ST-S1.10/.11/.12 green with real OpenAI + Tavily
+b7dea38  Sprint S1 full stack wires end-to-end
+4f67394  fixup: platform boots clean; Progress.md log
+bbce1d6  Sprint S1 layer 4: demo compose + Dockerfiles + SDK register update
+6dff8ff  Sprint S1 layer 3: proxy addons (identity, enforcement, counters)
+4cf47f0  Sprint S1 layer 2: orchestrator (register + resolve MCP)
+cf21fe5  Sprint S1 layer 1: platform Dockerfile, supervisord, config YAMLs
+9ef85a6  Sprint S1 plan: self-registration, 2-file config, demo-mcp, 12 tests
+a919d91  Step 1 scaffold: SDK, demo agents, MCP server, proxy-only Docker isolation
+```
+
+---
+
 ## 2026-04-21 — Sprint S1 full stack reaches upstream
 
 `docker compose up` brings the full demo stack up (amaze-platform + 3 agents

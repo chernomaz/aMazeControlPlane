@@ -18,6 +18,7 @@ multi-key transactions are needed in step 1.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -68,19 +69,23 @@ class ResolveMCPResponse(BaseModel):
 
 # --- App lifecycle --------------------------------------------------------
 
-app = FastAPI(title="aMaze Orchestrator", version="0.1.0")
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """FastAPI lifespan handler — replaces the deprecated @on_event hooks.
 
-
-@app.on_event("startup")
-async def startup() -> None:
+    Opens the Redis connection, seeds the MCP registry from YAML, yields
+    control to request handling, then closes Redis on shutdown.
+    """
     app.state.redis = redis.from_url(REDIS_URL, decode_responses=True)
     await _bootstrap_mcp_servers(app.state.redis)
     logger.info("orchestrator up: redis=%s config=%s", REDIS_URL, CONFIG_DIR)
+    try:
+        yield
+    finally:
+        await app.state.redis.aclose()
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    await app.state.redis.aclose()
+app = FastAPI(title="aMaze Orchestrator", version="0.1.0", lifespan=_lifespan)
 
 
 async def _bootstrap_mcp_servers(r: redis.Redis) -> None:
@@ -172,7 +177,11 @@ async def _register_mcp(req: RegisterMCPRequest) -> None:
 
 @app.get("/resolve/mcp/{name}", response_model=ResolveMCPResponse)
 async def resolve_mcp(name: str) -> ResolveMCPResponse:
-    raw = await app.state.redis.get(f"mcp:{name}")
+    try:
+        raw = await app.state.redis.get(f"mcp:{name}")
+    except redis.RedisError as e:
+        logger.error("redis unreachable during resolve_mcp(%s): %s", name, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
     if not raw:
         raise HTTPException(status_code=404, detail="mcp-not-registered")
     data = json.loads(raw)

@@ -40,10 +40,6 @@ async def _build_agent():
             client = MultiServerMCPClient(
                 {
                     "tools": {
-                        # Hostname `demo-mcp` is the registered MCP name. The
-                        # proxy (HTTP_PROXY is set for us) reads the Host, runs
-                        # the policy addon against the agent's allowlist, and
-                        # forwards to the registered MCP URL on allow.
                         "url": "http://demo-mcp:8000/mcp/",
                         "transport": "streamable_http",
                     }
@@ -54,11 +50,6 @@ async def _build_agent():
                 model=llm,
                 tools=tools,
                 system_prompt=(
-                    # Tight steering: this agent is the user-facing planner.
-                    # Use web_search only if the question needs external
-                    # facts; otherwise answer from general knowledge. Do NOT
-                    # call any other tool — the proxy will deny non-allowed
-                    # tool calls and the task will fail.
                     "You are a helpful research assistant. "
                     "Use the web_search tool ONLY when you need up-to-date "
                     "external facts. Do not call any other tool. "

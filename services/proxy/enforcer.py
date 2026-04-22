@@ -28,6 +28,7 @@ import pathlib
 import redis.asyncio as redis
 from mitmproxy import http
 
+from services.proxy._redis import client as redis_client
 from services.proxy.deny import deny
 from services.proxy.policy import (
     Policies,
@@ -39,19 +40,18 @@ from services.proxy.policy import (
 
 logger = logging.getLogger(__name__)
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 CONFIG_DIR = pathlib.Path(os.environ.get("CONFIG_DIR", "/app/config"))
+
+
+class _RedisLookupError(RuntimeError):
+    """Raised when Redis is unreachable — caller translates into a
+    structured 503 deny so we don't classify as `host-not-allowed` when
+    the underlying state store is down (fail-closed, correct reason)."""
 
 
 class PolicyEnforcer:
     def __init__(self) -> None:
         self._policies: Policies = load_policies(CONFIG_DIR / "policies.yaml")
-        self._redis: redis.Redis | None = None
-
-    async def _r(self) -> redis.Redis:
-        if self._redis is None:
-            self._redis = redis.from_url(REDIS_URL, decode_responses=True)
-        return self._redis
 
     async def request(self, flow: http.HTTPFlow) -> None:
         if flow.response is not None:
@@ -71,7 +71,7 @@ class PolicyEnforcer:
             deny(flow, "policy-not-found", agent_id=agent_id)
             return
 
-        host = flow.request.host
+        host = flow.request.pretty_host
 
         # --- LLM classification -------------------------------------------
         if is_llm_host(host):
@@ -90,7 +90,15 @@ class PolicyEnforcer:
             return
 
         # --- MCP classification -------------------------------------------
-        mcp_entry = await self._lookup_mcp(host)
+        try:
+            mcp_entry = await self._lookup_mcp(host)
+        except _RedisLookupError:
+            # C3 — fail-closed with correct reason code. Prior code
+            # swallowed the error and fell through to `host-not-allowed`,
+            # which hides the real cause.
+            deny(flow, "redis-unavailable", status=503)
+            return
+
         if mcp_entry is not None:
             if host not in policy.allowed_mcp_servers:
                 deny(flow, "mcp-not-allowed", server=host)
@@ -126,12 +134,13 @@ class PolicyEnforcer:
         flow.request.headers["x-amaze-caller"] = agent_id
 
     async def _lookup_mcp(self, host: str) -> dict | None:
-        """Return mcp:{host} payload from Redis, or None if unregistered."""
+        """Return mcp:{host} payload from Redis, None if unregistered,
+        raise _RedisLookupError if Redis itself is unreachable."""
         try:
-            raw = await (await self._r()).get(f"mcp:{host}")
+            raw = await (await redis_client()).get(f"mcp:{host}")
         except redis.RedisError as e:
             logger.error("redis unreachable during mcp lookup: %s", e)
-            return None
+            raise _RedisLookupError from e
         if not raw:
             return None
         try:

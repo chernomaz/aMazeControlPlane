@@ -132,8 +132,14 @@ def register_and_wait(on_ready: threading.Event) -> None:
     The orchestrator's /register endpoint is single-shot: one POST returns
     the session_id + bearer_token. There is no RUNNING-vs-PENDING polling
     in the new control plane; the agent is ready the moment it has a
-    bearer. This function retries network failures only (transient host
-    unreachable during compose startup), not HTTP error responses.
+    bearer.
+
+    Retry policy: network-level failures (connection refused, DNS, timeout)
+    are retried because compose startup can race — the orchestrator may
+    not yet be listening when the agent boots. HTTP-level errors (4xx and
+    5xx) are NOT retried: a 400 means a malformed request, a 422 means the
+    agent_id is invalid, a 500 means the orchestrator is broken — all of
+    which retries won't fix, and retrying a 4xx just multiplies log noise.
     """
     body = json.dumps({"agent_id": _config.agent_id}).encode()
 
@@ -158,6 +164,20 @@ def register_and_wait(on_ready: threading.Event) -> None:
                 print(f"[amaze {_config.agent_id}] registered: {safe}", flush=True)
                 on_ready.set()
                 return
+        except urllib.error.HTTPError as e:
+            # HTTPError IS a subclass of URLError — catch it first and
+            # fail fast. Retrying a 400/422/500 won't help.
+            body_preview = ""
+            try:
+                body_preview = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:  # noqa: BLE001 — diagnostic best-effort
+                pass
+            print(
+                f"[amaze {_config.agent_id}] orchestrator rejected register: "
+                f"HTTP {e.code} {body_preview}",
+                flush=True,
+            )
+            os._exit(1)
         except (urllib.error.URLError, ConnectionError) as e:
             print(
                 f"[amaze {_config.agent_id}] register attempt {attempt+1} failed: {e}",
