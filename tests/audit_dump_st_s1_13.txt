@@ -1,0 +1,30 @@
+[setup] cleared 6 session counter keys
+
+══════════════════════════════════════════════════════════════════════════════
+  ST-S1.13 — Agent not allowed (A2A host-not-allowed)
+  prompt: '(direct A2A call: agent-sdk1 → agent-sdk2; not in allowed_agents)'
+══════════════════════════════════════════════════════════════════════════════
+
+  HTTP 403
+  reply:
+    {"error": "denied", "reason": "host-not-allowed", "host": "agent-sdk2"}
+
+
+  ▸ audit:agent-sdk1  (1 records)
+    kinds: ['unknown']  denied: 1
+    unique trace_ids: 1
+
+  [ 0] unknown DENIED target=agent-sdk2 tool=—
+      stream-id  : 1777284622009-0
+      ts         : 1777284622
+      agent      : agent-sdk1
+      session    : 6aa1f227-2f0f-407b-8131-f7176ec2c941
+      trace_id   : 2b733108dd56c801703f28afe4614ccb
+      span_id    : 295b1687ff99bfbf
+      denial     : host-not-allowed
+      alert      : {"type": "host-not-allowed", "kind": "unknown", "agent_id": "agent-sdk1", "target": "agent-sdk2", "host": "agent-sdk2"}
+      input      :
+        {"jsonrpc": "2.0", "id": "x", "method": "tasks/send", "params": {"id": "t", "message": {"role": "user", "parts": [{"text": "hi"}]}}}
+      output     :
+        {"error": "denied", "reason": "host-not-allowed", "host": "agent-sdk2"}
+

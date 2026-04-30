@@ -1,0 +1,82 @@
+# Standalone compose for running S2 system tests.
+#
+# Bring up:  docker compose -f tests/compose.test.yml up --build -d
+# Tear down: docker compose -f tests/compose.test.yml down -v
+#
+# Ports exposed to host:
+#   18001 — orchestrator  (POST /register, GET /resolve/*)
+#   18080 — proxy         (mitmproxy)
+#   16379 — Redis         (test setup / audit verification)
+#   16686 — Jaeger UI     (trace inspection)
+#
+# Network model:
+#   No internal-bridge isolation. All test services share the default
+#   compose project network. Service names resolve via Docker DNS so the
+#   proxy can forward to mock-mcp / mock-agent / mock-llm by name.
+#   mock-llm is also aliased to `api.openai.com` so the proxy intercepts
+#   LLM traffic and no real OpenAI key is needed.
+#
+# Mock services:
+#   mock-mcp   — upstream for MCP tool calls
+#   mock-agent (alias: test-a2a-callee) — upstream for A2A
+#   mock-llm   (alias: api.openai.com)  — upstream for LLM
+
+name: amaze-test
+
+services:
+  amaze-redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  amaze:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "18001:8001"
+      - "18080:8080"
+      - "16686:16686"
+    volumes:
+      - amaze-test-proxy-ca:/opt/mitmproxy
+      - amaze-test-jaeger-data:/data/jaeger
+    depends_on:
+      amaze-redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://amaze-redis:6379
+
+  mock-mcp:
+    image: python:3.12-slim
+    command: python /app/mock_mcp.py
+    volumes:
+      - ./mock_mcp.py:/app/mock_mcp.py:ro
+
+  mock-agent:
+    image: python:3.12-slim
+    command: python /app/mock_mcp.py
+    volumes:
+      - ./mock_mcp.py:/app/mock_mcp.py:ro
+    networks:
+      default:
+        aliases:
+          - test-a2a-callee
+
+  mock-llm:
+    image: python:3.12-slim
+    command: python /app/mock_llm.py
+    volumes:
+      - ./mock_llm.py:/app/mock_llm.py:ro
+    networks:
+      default:
+        aliases:
+          - api.openai.com
+
+volumes:
+  amaze-test-proxy-ca:
+  amaze-test-jaeger-data:

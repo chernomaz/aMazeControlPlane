@@ -1,0 +1,336 @@
+[setup] cleared 6 session counter keys
+
+══════════════════════════════════════════════════════════════════════════════
+  ST-S1.10 — Bitcoin (A2A + LLM)
+  prompt: 'search for current bitcoin price'
+══════════════════════════════════════════════════════════════════════════════
+
+  HTTP 200
+  reply:
+    Thank you for the update on the current Bitcoin price range. If you need any specific information or analysis related to Bitcoin or cryptocurrency, feel free to ask!
+
+
+  ▸ audit:agent-sdk  (15 records)
+    kinds: ['llm', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'llm', 'a2a']  denied: 0
+    unique trace_ids: 1
+
+  [ 0] llm   * allow  target=openai tool=—
+      stream-id  : 1777284613765-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 80fdd4de899db2f4
+      llm-flags  : indirect (returned tool_calls)
+      input      :
+        {"messages": [{"content": "You are a helpful research assistant. Use the web_search tool ONLY when you need up-to-date external facts. Do not call any other tool. Always cite sources.", "role": "system"}, {"content": "search for current bitcoin price", "role": "user"}], "model": "gpt-4.1-mini", "stream": false, "temperature": 0.0, "tools": [{"type": "function", "function": {"name": "sql_query", "description": "Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "dummy_email", "description": "Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.", "parameters": {"additionalProperties": false, "properties": {"person": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null}, "config": {"default": null}}, "type": "object"}}}, {"type": "function", "function": {"name": "web_search", "description": "Search the web for recent information.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "file_read", "description": "Read the contents of a local file and return it as a string.", "parameters": {"additionalProperties": false, "properties": {"path": {"type": "string"}, "config": {"default": null}}, "required": ["path"], "type": "object"}}}]}
+      output     :
+        {
+          "id": "chatcmpl-DZDCna1nVNtRmwPrKDzBud8BykKtx",
+          "object": "chat.completion",
+          "created": 1777284613,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_vryxoc6LUVy0psqJyw1mUlqF",
+                    "type": "function",
+                    "function": {
+                      "name": "web_search",
+                      "arguments": "{\"query\":\"current bitcoin price\"}"
+                    }
+                  }
+                ],
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 304,
+            "completion_tokens": 16,
+            "total_tokens": 320,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_487edb2e85"
+        }
+
+  [ 1] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284613780-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : c8064fa5cce58caf
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        (empty)
+
+  [ 2] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284613788-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 8528a3bdc79e324b
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{"experimental":{},"logging":{},"prompts":{"listChanged":true},"resources":{"subscribe":false,"listChanged":true},"tools":{"listChanged":true},"extensions":{"io.modelcontextprotocol/ui":{}}},"serverInfo":{"name":"demo-mcp","version":"3.2.4"}}}
+        
+
+  [ 3] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284613802-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : b12c078c4a122b96
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 4] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284613802-1
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 13095f925cc87d73
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [ 5] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284613809-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 9408c990b6e5777c
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 6] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777284613817-0
+      ts         : 1777284613
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 0eb9fb986ca0334d
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current bitcoin price"}},"jsonrpc":"2.0","id":1}
+      output     :
+        (empty)
+
+  [ 7] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777284614893-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 5d513d9dc8089e22
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current bitcoin price"}},"jsonrpc":"2.0","id":1}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":1,"result":{"_meta":{"fastmcp":{"wrap_result":true}},"content":[{"type":"text","text":"Title: Bitcoin (BTC) Price Today: BTC Live Price, Charts, News - Crypto.com\nURL: https://crypto.com/en/price/bitcoin\nContent: Bitcoin's price today is $79,025.33, with a 24-hour trading volume of $26.96B. BTC is +1.57% in the last 24 hours. It is currently -0.52% from its 7-day\n\nTitle: Bitcoin (BTC) Price USD Today, News, Charts, Market Cap | Coinbase\nURL: https://www.coinbase.com/price/bitcoin\nContent: Recent trends. BTC's current market price is $77,636.78. From Bitcoin's previous price points, we've seen a 2% increase from yesterday's $77,565.02 price\n\nTitle: Bitcoin price today, BTC to USD live price, marketcap and chart\nURL: https://coinmarketcap.com/currencies/bitcoin/\nContent: The live Bitcoin price today is $78,908.48 USD with a 24-hour trading volume of $26,842,776,618 USD. We update our BTC to USD price in real-time. Bitcoin is up\n\nTitle: Bitcoin price today, BTC to USD live price, marketcap and chart\nURL: https://www.coindesk.com/price/bitcoin\nContent: The price of Bitcoin (BTC) is $78894.44 today as of Apr 27, 2026, 1:01 am EDT, with a 24-hour trading volume of $11.13B.\n\nTitle: bitcoin (BTC) | Live Price, Interactive Charts, Converter, News\nURL: https://www.binance.us/price/bitcoin\nContent: The live Bitcoin price today is $77,897.28 USD with a 24-hour trading volume of $27,028,847,288.97 USD. We update our Bitcoin to USD price in real-time."}],"structuredContent":{"result":"Title: Bitcoin (BTC) Price Today: BTC Live Price, Charts, News - Crypto.com\nURL: https://crypto.com/en/price/bitcoin\nContent: Bitcoin's price today is $79,025.33, with a 24-hour trading volume of $26.96B. BTC is +1.57% in the last 24 hours. It is currently -0.52% from its 7-day\n\nTitle: Bitcoin (BTC) Price USD Today, News, Charts, Market Cap | Coinbase\nURL: https://www.coinbase.com/price/bitcoin\nContent: Recent trends. BTC's current 
+
+  [ 8] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284614903-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : d5ce84ceaf9083d0
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        (empty)
+
+  [ 9] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284614912-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : d6e4fc9bdbaaf6f7
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"sql_query","description":"Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"dummy_email","description":"Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.","inputSchema":{"additionalProperties":false,"properties":{"person":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"config":{"default":null,"title":"Config"}},"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"web_search","description":"Search the web for recent information.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"file_read","description":"Read the contents of a local file and return it as a string.","inputSchema":{"additionalProperties":false,"properties":{"path":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["path"],"type":"obj
+
+  [10] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284614923-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : ce23fd3689edb434
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [11] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284614932-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : c2ce92e729cd5b16
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [12] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777284614933-0
+      ts         : 1777284614
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : f686650cef7f4dfb
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [13] llm   ↩ allow  target=openai tool=—
+      stream-id  : 1777284616345-0
+      ts         : 1777284616
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : f3a79a4d1f6a5f28
+      llm-flags  : synthesis (input had tool results)
+      input      :
+        {"messages": [{"content": "You are a helpful research assistant. Use the web_search tool ONLY when you need up-to-date external facts. Do not call any other tool. Always cite sources.", "role": "system"}, {"content": "search for current bitcoin price", "role": "user"}, {"content": null, "role": "assistant", "tool_calls": [{"type": "function", "id": "call_vryxoc6LUVy0psqJyw1mUlqF", "function": {"name": "web_search", "arguments": "{\"query\": \"current bitcoin price\"}"}}]}, {"content": [{"type": "text", "text": "Title: Bitcoin (BTC) Price Today: BTC Live Price, Charts, News - Crypto.com\nURL: https://crypto.com/en/price/bitcoin\nContent: Bitcoin's price today is $79,025.33, with a 24-hour trading volume of $26.96B. BTC is +1.57% in the last 24 hours. It is currently -0.52% from its 7-day\n\nTitle: Bitcoin (BTC) Price USD Today, News, Charts, Market Cap | Coinbase\nURL: https://www.coinbase.com/price/bitcoin\nContent: Recent trends. BTC's current market price is $77,636.78. From Bitcoin's previous price points, we've seen a 2% increase from yesterday's $77,565.02 price\n\nTitle: Bitcoin price today, BTC to USD live price, marketcap and chart\nURL: https://coinmarketcap.com/currencies/bitcoin/\nContent: The live Bitcoin price today is $78,908.48 USD with a 24-hour trading volume of $26,842,776,618 USD. We update our BTC to USD price in real-time. Bitcoin is up\n\nTitle: Bitcoin price today, BTC to USD live price, marketcap and chart\nURL: https://www.coindesk.com/price/bitcoin\nContent: The price of Bitcoin (BTC) is $78894.44 today as of Apr 27, 2026, 1:01 am EDT, with a 24-hour trading volume of $11.13B.\n\nTitle: bitcoin (BTC) | Live Price, Interactive Charts, Converter, News\nURL: https://www.binance.us/price/bitcoin\nContent: The live Bitcoin price today is $77,897.28 USD with a 24-hour trading volume of $27,028,847,288.97 USD. We update our Bitcoin to USD price in real-time."}], "role": "tool", "tool_call_id": "call_vryxoc6LUVy0psqJyw1mUlqF"}], "model": "gpt-4.1-m
+      output     :
+        {
+          "id": "chatcmpl-DZDCpZ548AEkBCxV56l4wU027SuCA",
+          "object": "chat.completion",
+          "created": 1777284615,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "The current price of Bitcoin is approximately between $77,636.78 and $79,025.33 according to various sources. For example, Crypto.com lists it at $79,025.33, Coinbase at $77,636.78, and CoinDesk at $78,894.44.",
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 723,
+            "completion_tokens": 62,
+            "total_tokens": 785,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_487edb2e85"
+        }
+
+  [14] a2a    allow  target=agent-sdk1 tool=—
+      stream-id  : 1777284618771-0
+      ts         : 1777284618
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : f87db48b8c86cfa2
+      input      :
+        {"jsonrpc":"2.0","id":"1","method":"tasks/send","params":{"id":"task-sdk-1","message":{"role":"user","parts":[{"type":"text","text":"The current price of Bitcoin is approximately between $77,636.78 and $79,025.33 according to various sources. For example, Crypto.com lists it at $79,025.33, Coinbase at $77,636.78, and CoinDesk at $78,894.44."}]}}}
+      output     :
+        {"jsonrpc":"2.0","id":"1","result":{"id":"task-sdk-1","status":{"state":"completed"},"artifacts":[{"parts":[{"type":"text","text":"Thank you for the update on the current Bitcoin price range. If you need any specific information or analysis related to Bitcoin or cryptocurrency, feel free to ask!"}]}]}}
+
+
+  ▸ audit:agent-sdk1  (1 records)
+    kinds: ['llm']  denied: 0
+    unique trace_ids: 1
+
+  [ 0] llm    allow  target=openai tool=—
+      stream-id  : 1777284618765-0
+      ts         : 1777284618
+      agent      : agent-sdk1
+      session    : 6aa1f227-2f0f-407b-8131-f7176ec2c941
+      trace_id   : 3ba939f9d53ca0c8c1429c8e88e90f8e
+      span_id    : 31185c5d25dba4f5
+      input      :
+        {"messages": [{"content": "You are a helpful research assistant. Use the web_search tool ONLY when you need up-to-date external facts. Do not call any other tool \u2014 the proxy will deny non-allowed calls. Always cite sources.", "role": "system"}, {"content": "The current price of Bitcoin is approximately between $77,636.78 and $79,025.33 according to various sources. For example, Crypto.com lists it at $79,025.33, Coinbase at $77,636.78, and CoinDesk at $78,894.44.", "role": "user"}], "model": "gpt-4.1-mini", "stream": false, "temperature": 0.0, "tools": [{"type": "function", "function": {"name": "sql_query", "description": "Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "dummy_email", "description": "Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.", "parameters": {"additionalProperties": false, "properties": {"person": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null}, "config": {"default": null}}, "type": "object"}}}, {"type": "function", "function": {"name": "web_search", "description": "Search the web for recent information.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "file_read", "description": "Read the contents of a local file and return it as a 
+      output     :
+        {
+          "id": "chatcmpl-DZDCrOBGhAqmGt5dH7fqZxvIeOPiq",
+          "object": "chat.completion",
+          "created": 1777284617,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Thank you for the update on the current Bitcoin price range. If you need any specific information or analysis related to Bitcoin or cryptocurrency, feel free to ask!",
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 369,
+            "completion_tokens": 32,
+            "total_tokens": 401,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_283a574ac4"
+        }
+
+
+  shared trace_ids across ['agent-sdk', 'agent-sdk1']: ['3ba939f9d53ca0c8c1429c8e88e90f8e']

@@ -1,0 +1,543 @@
+[setup] cleared 6 session counter keys
+
+══════════════════════════════════════════════════════════════════════════════
+  ST-S1.11 — Weather (A2A + LLM + MCP allow)
+  prompt: 'search for current weather in London'
+══════════════════════════════════════════════════════════════════════════════
+
+  HTTP 200
+  reply:
+    The current weather in London, UK is overcast with a temperature of 12.3°C (54.1°F). It is nighttime with a wind speed of 6.7 mph coming from the east and humidity at 67%.
+
+
+  ▸ audit:agent-sdk  (15 records)
+    kinds: ['llm', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'llm', 'a2a']  denied: 0
+    unique trace_ids: 1
+
+  [ 0] llm   * allow  target=openai tool=—
+      stream-id  : 1777239781060-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 6e11aded6e2b6af9
+      llm-flags  : indirect (returned tool_calls)
+      input      :
+        {"messages": [{"content": "You are a helpful research assistant. Use the web_search tool ONLY when you need up-to-date external facts. Do not call any other tool. Always cite sources.", "role": "system"}, {"content": "search for current weather in London", "role": "user"}], "model": "gpt-4.1-mini", "stream": false, "temperature": 0.0, "tools": [{"type": "function", "function": {"name": "sql_query", "description": "Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "dummy_email", "description": "Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.", "parameters": {"additionalProperties": false, "properties": {"person": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null}, "config": {"default": null}}, "type": "object"}}}, {"type": "function", "function": {"name": "web_search", "description": "Search the web for recent information.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "file_read", "description": "Read the contents of a local file and return it as a string.", "parameters": {"additionalProperties": false, "properties": {"path": {"type": "string"}, "config": {"default": null}}, "required": ["path"], "type": "object"}}}]}
+      output     :
+        {
+          "id": "chatcmpl-DZ1XgXN20L5JWep43cNJeppiAtK6U",
+          "object": "chat.completion",
+          "created": 1777239780,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_IWvbsytZEu45exNyYF0N87TG",
+                    "type": "function",
+                    "function": {
+                      "name": "web_search",
+                      "arguments": "{\"query\":\"current weather in London\"}"
+                    }
+                  }
+                ],
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 305,
+            "completion_tokens": 17,
+            "total_tokens": 322,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_947ee9027e"
+        }
+
+  [ 1] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239781074-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 99aa830e84dd3f6d
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        (empty)
+
+  [ 2] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239781080-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : f6b739173c0b99dc
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{"experimental":{},"logging":{},"prompts":{"listChanged":true},"resources":{"subscribe":false,"listChanged":true},"tools":{"listChanged":true},"extensions":{"io.modelcontextprotocol/ui":{}}},"serverInfo":{"name":"demo-mcp","version":"3.2.4"}}}
+        
+
+  [ 3] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239781092-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 51607c9ec757f0ee
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [ 4] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239781095-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : c31985f979c4dfd3
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 5] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239781101-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 53971cfe1f5cb860
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 6] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777239781110-0
+      ts         : 1777239781
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : e40279f1a8bdf5fb
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current weather in London"}},"jsonrpc":"2.0","id":1}
+      output     :
+        (empty)
+
+  [ 7] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777239782541-0
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : ad96af0a29d9b78b
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current weather in London"}},"jsonrpc":"2.0","id":1}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":1,"result":{"_meta":{"fastmcp":{"wrap_result":true}},"content":[{"type":"text","text":"Title: Weather in London\nURL: https://www.weatherapi.com/\nContent: {'location': {'name': 'London', 'region': 'City of London, Greater London', 'country': 'United Kingdom', 'lat': 51.5171, 'lon': -0.1062, 'tz_id': 'Europe/London', 'localtime_epoch': 1777239785, 'localtime': '2026-04-26 22:43'}, 'current': {'last_updated_epoch': 1777239000, 'last_updated': '2026-04-26 22:30', 'temp_c': 12.3, 'temp_f': 54.1, 'is_day': 0, 'condition': {'text': 'Overcast', 'icon': '//cdn.weatherapi.com/weather/64x64/night/122.png', 'code': 1009}, 'wind_mph': 6.7, 'wind_kph': 10.8, 'wind_degree': 98, 'wind_dir': 'E', 'pressure_mb': 1024.0, 'pressure_in': 30.24, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 67, 'cloud': 100, 'feelslike_c': 11.3, 'feelslike_f': 52.3, 'windchill_c': 9.3, 'windchill_f': 48.8, 'heatindex_c': 10.7, 'heatindex_f': 51.2, 'dewpoint_c': 4.9, 'dewpoint_f': 40.9, 'vis_km': 10.0, 'vis_miles': 6.0, 'uv': 0.0, 'gust_mph': 9.2, 'gust_kph': 14.9}}\n\nTitle: England weather forecast for Sunday, 26 April 2026 - Weather25.com\nURL: https://www.weather25.com/europe/united-kingdom?page=date&date=26-4\nContent: Hourly weather forecast for Sunday, 26 April 2026 ; 46°F · 48°F · 46°F · 51°F ; Cloudy. Clear. Sunny. Sunny.\n\nTitle: London, London, United Kingdom Monthly Weather | AccuWeather\nURL: https://www.accuweather.com/en/gb/london/ec4a-2/april-weather/328328\nContent: London's April 2026 forecast shows daily high temperatures ranging from 60° to 72°, with overnight lows between 45° and 54°. The average high for April is\n\nTitle: Weather in London in April 2026 (England)\nURL: https://world-weather.info/forecast/united_kingdom/london/april-2026/\nContent: Detailed ⚡ London Weather Forecast for April 2026 – day/night 🌡️ temperatures, precipitations – World-Weather.info.\n\nTitle: London Weather 26 April 2026: Will It Be S
+
+  [ 8] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239782553-0
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 0261a3f69d493809
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        (empty)
+
+  [ 9] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239782560-0
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : e70dd9b2698b94d1
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"sql_query","description":"Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"dummy_email","description":"Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.","inputSchema":{"additionalProperties":false,"properties":{"person":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"config":{"default":null,"title":"Config"}},"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"web_search","description":"Search the web for recent information.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"file_read","description":"Read the contents of a local file and return it as a string.","inputSchema":{"additionalProperties":false,"properties":{"path":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["path"],"type":"obj
+
+  [10] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239782570-0
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : c33494ec5f44fc98
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [11] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239782577-0
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 77f9094931e67f10
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [12] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239782577-1
+      ts         : 1777239782
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 67e7d4de658884b7
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [13] llm   ↩ allow  target=openai tool=—
+      stream-id  : 1777239783407-0
+      ts         : 1777239783
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : bfc9009f1e2d6df0
+      llm-flags  : synthesis (input had tool results)
+      input      :
+        {"messages": [{"content": "You are a helpful research assistant. Use the web_search tool ONLY when you need up-to-date external facts. Do not call any other tool. Always cite sources.", "role": "system"}, {"content": "search for current weather in London", "role": "user"}, {"content": null, "role": "assistant", "tool_calls": [{"type": "function", "id": "call_IWvbsytZEu45exNyYF0N87TG", "function": {"name": "web_search", "arguments": "{\"query\": \"current weather in London\"}"}}]}, {"content": [{"type": "text", "text": "Title: Weather in London\nURL: https://www.weatherapi.com/\nContent: {'location': {'name': 'London', 'region': 'City of London, Greater London', 'country': 'United Kingdom', 'lat': 51.5171, 'lon': -0.1062, 'tz_id': 'Europe/London', 'localtime_epoch': 1777239785, 'localtime': '2026-04-26 22:43'}, 'current': {'last_updated_epoch': 1777239000, 'last_updated': '2026-04-26 22:30', 'temp_c': 12.3, 'temp_f': 54.1, 'is_day': 0, 'condition': {'text': 'Overcast', 'icon': '//cdn.weatherapi.com/weather/64x64/night/122.png', 'code': 1009}, 'wind_mph': 6.7, 'wind_kph': 10.8, 'wind_degree': 98, 'wind_dir': 'E', 'pressure_mb': 1024.0, 'pressure_in': 30.24, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 67, 'cloud': 100, 'feelslike_c': 11.3, 'feelslike_f': 52.3, 'windchill_c': 9.3, 'windchill_f': 48.8, 'heatindex_c': 10.7, 'heatindex_f': 51.2, 'dewpoint_c': 4.9, 'dewpoint_f': 40.9, 'vis_km': 10.0, 'vis_miles': 6.0, 'uv': 0.0, 'gust_mph': 9.2, 'gust_kph': 14.9}}\n\nTitle: England weather forecast for Sunday, 26 April 2026 - Weather25.com\nURL: https://www.weather25.com/europe/united-kingdom?page=date&date=26-4\nContent: Hourly weather forecast for Sunday, 26 April 2026 ; 46\u00b0F \u00b7 48\u00b0F \u00b7 46\u00b0F \u00b7 51\u00b0F ; Cloudy. Clear. Sunny. Sunny.\n\nTitle: London, London, United Kingdom Monthly Weather | AccuWeather\nURL: https://www.accuweather.com/en/gb/london/ec4a-2/april-weather/328328\nContent: London's April 2026 forecast shows daily high temperat
+      output     :
+        {
+          "id": "chatcmpl-DZ1XiWIwTNwKZaWOw6vUAxTr6TYDl",
+          "object": "chat.completion",
+          "created": 1777239782,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "The current weather in London is overcast with a temperature of 12.3°C (54.1°F). The wind is blowing from the east at 6.7 mph (10.8 kph), humidity is at 67%, and the cloud cover is 100%. It is currently nighttime in London.",
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1042,
+            "completion_tokens": 65,
+            "total_tokens": 1107,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_04d1c4c1f2"
+        }
+
+  [14] a2a    allow  target=agent-sdk2 tool=—
+      stream-id  : 1777239787351-0
+      ts         : 1777239787
+      agent      : agent-sdk
+      session    : 86e3cb79-dedb-48e5-8e3c-fad476719afc
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : d87f08f2fa9ad66e
+      input      :
+        {"jsonrpc":"2.0","id":"1","method":"tasks/send","params":{"id":"task-sdk-1","message":{"role":"user","parts":[{"type":"text","text":"The current weather in London is overcast with a temperature of 12.3°C (54.1°F). The wind is blowing from the east at 6.7 mph (10.8 kph), humidity is at 67%, and the cloud cover is 100%. It is currently nighttime in London."}]}}}
+      output     :
+        {"jsonrpc":"2.0","id":"1","result":{"id":"task-sdk-1","status":{"state":"completed"},"artifacts":[{"parts":[{"type":"text","text":"The current weather in London, UK is overcast with a temperature of 12.3°C (54.1°F). It is nighttime with a wind speed of 6.7 mph coming from the east and humidity at 67%."}]}]}}
+
+
+  ▸ audit:agent-sdk2  (14 records)
+    kinds: ['llm', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'mcp', 'llm']  denied: 0
+    unique trace_ids: 1
+
+  [ 0] llm   * allow  target=openai tool=—
+      stream-id  : 1777239784594-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 02a273269e3f7f56
+      llm-flags  : indirect (returned tool_calls)
+      input      :
+        {"messages": [{"content": "You are a task-dispatcher assistant. When asked for weather, call web_search with the query you are given. When asked to read mail, call dummy_email with the person name. Return a concise, factual answer with the result.", "role": "system"}, {"content": "Use web_search to find the current weather in London, UK. Summarise the result in one or two sentences.", "role": "user"}], "model": "gpt-4.1-mini", "stream": false, "temperature": 0.0, "tools": [{"type": "function", "function": {"name": "sql_query", "description": "Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "dummy_email", "description": "Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.", "parameters": {"additionalProperties": false, "properties": {"person": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null}, "config": {"default": null}}, "type": "object"}}}, {"type": "function", "function": {"name": "web_search", "description": "Search the web for recent information.", "parameters": {"additionalProperties": false, "properties": {"query": {"type": "string"}, "config": {"default": null}}, "required": ["query"], "type": "object"}}}, {"type": "function", "function": {"name": "file_read", "description": "Read the contents of a local file and return it as a string.", "parameters": {"additionalProperties": false, "properties": {"path": {"type":
+      output     :
+        {
+          "id": "chatcmpl-DZ1Xjd3gzEatjEd6kqc2vFf8yBtBf",
+          "object": "chat.completion",
+          "created": 1777239783,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_ITACBqNjpvAPke0geREk17Wf",
+                    "type": "function",
+                    "function": {
+                      "name": "web_search",
+                      "arguments": "{\"query\":\"current weather in London, UK\"}"
+                    }
+                  }
+                ],
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 338,
+            "completion_tokens": 19,
+            "total_tokens": 357,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_3d6a492d53"
+        }
+
+  [ 1] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239784608-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 588496055ebc1d5d
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        (empty)
+
+  [ 2] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239784614-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 93be541dc0b8d4a8
+      input      :
+        {"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp","version":"0.1.0"}},"jsonrpc":"2.0","id":0}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{"experimental":{},"logging":{},"prompts":{"listChanged":true},"resources":{"subscribe":false,"listChanged":true},"tools":{"listChanged":true},"extensions":{"io.modelcontextprotocol/ui":{}}},"serverInfo":{"name":"demo-mcp","version":"3.2.4"}}}
+        
+
+  [ 3] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239784628-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 74cbbe50ead810ff
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 4] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239784629-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 1b9888ca75d6c334
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [ 5] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239784637-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : dbdec81b688e31ae
+      input      :
+        {"method":"notifications/initialized","jsonrpc":"2.0"}
+      output     :
+        (empty)
+
+  [ 6] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777239784646-0
+      ts         : 1777239784
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 1ec3e4b9ea6fd0c9
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current weather in London, UK"}},"jsonrpc":"2.0","id":1}
+      output     :
+        (empty)
+
+  [ 7] mcp    allow  target=demo-mcp tool=web_search
+      stream-id  : 1777239786303-0
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 31b525b6ecc12f44
+      input      :
+        {"method":"tools/call","params":{"name":"web_search","arguments":{"query":"current weather in London, UK"}},"jsonrpc":"2.0","id":1}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":1,"result":{"_meta":{"fastmcp":{"wrap_result":true}},"content":[{"type":"text","text":"Title: Weather in London, UK\nURL: https://www.weatherapi.com/\nContent: {'location': {'name': 'London', 'region': 'City of London, Greater London', 'country': 'United Kingdom', 'lat': 51.5171, 'lon': -0.1062, 'tz_id': 'Europe/London', 'localtime_epoch': 1777239748, 'localtime': '2026-04-26 22:42'}, 'current': {'last_updated_epoch': 1777239000, 'last_updated': '2026-04-26 22:30', 'temp_c': 12.3, 'temp_f': 54.1, 'is_day': 0, 'condition': {'text': 'Overcast', 'icon': '//cdn.weatherapi.com/weather/64x64/night/122.png', 'code': 1009}, 'wind_mph': 6.7, 'wind_kph': 10.8, 'wind_degree': 98, 'wind_dir': 'E', 'pressure_mb': 1024.0, 'pressure_in': 30.24, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 67, 'cloud': 100, 'feelslike_c': 11.3, 'feelslike_f': 52.3, 'windchill_c': 9.3, 'windchill_f': 48.8, 'heatindex_c': 10.7, 'heatindex_f': 51.2, 'dewpoint_c': 4.9, 'dewpoint_f': 40.9, 'vis_km': 10.0, 'vis_miles': 6.0, 'uv': 0.0, 'gust_mph': 9.2, 'gust_kph': 14.9}}\n\nTitle: London Weather 26 April 2026: Will It Be Sunshine or Showers?\nURL: https://www.youtube.com/watch?v=hn_xI0Y_5Fk\nContent: London Weather 26 April 2026: Will It Be Sunshine or Showers? 1 ... – Met Office weather forecast UK. Met Office - UK Weather. New. 53K\n\nTitle: London, London, United Kingdom Monthly Weather | AccuWeather\nURL: https://www.accuweather.com/en/gb/london/ec4a-2/april-weather/328328\nContent: London's April 2026 forecast shows daily high temperatures ranging from 60° to 72°, with overnight lows between 45° and 54°. The average high for April is\n\nTitle: London weather in April 2026 - Weather25.com\nURL: https://www.weather25.com/europe/united-kingdom/london?page=month&month=April\nContent: The temperatures in London in April are quite cold with temperatures between 42°F and 57°F, warm clothes are a must. You can expect about 3 to 8 days of rain\n\nTitle: W
+
+  [ 8] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239786314-0
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : f7591f3bb7e4f5e9
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        (empty)
+
+  [ 9] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239786322-0
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 62db07eaccdeed8f
+      input      :
+        {"method":"tools/list","jsonrpc":"2.0","id":2}
+      output     :
+        event: message
+        data: {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"sql_query","description":"Execute a SQL query against the MySQL database and return the results.\n\nThe database contains three tables:\n- users(id, name, email, city, age, is_active, created_at)\n- products(id, name, description, price, category, stock, created_at)\n- orders(id, user_id, product_id, quantity, total_price, status, created_at)\n\nUse SELECT queries to explore data. INSERT/UPDATE/DELETE are also supported.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"dummy_email","description":"Return predefined dummy emails. If person is specified, return only the email for that person.\nKnown recipients: alice, bob, carol.","inputSchema":{"additionalProperties":false,"properties":{"person":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"config":{"default":null,"title":"Config"}},"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"web_search","description":"Search the web for recent information.","inputSchema":{"additionalProperties":false,"properties":{"query":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["query"],"type":"object"},"outputSchema":{"properties":{"result":{"type":"string"}},"required":["result"],"type":"object","x-fastmcp-wrap-result":true},"_meta":{"fastmcp":{"tags":[]}}},{"name":"file_read","description":"Read the contents of a local file and return it as a string.","inputSchema":{"additionalProperties":false,"properties":{"path":{"type":"string"},"config":{"default":null,"title":"Config"}},"required":["path"],"type":"obj
+
+  [10] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239786333-0
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : f8327776c102ef26
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [11] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239786339-0
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 3b6ba7eff23811ee
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [12] mcp    allow  target=demo-mcp tool=—
+      stream-id  : 1777239786339-1
+      ts         : 1777239786
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : cc400076cecf7b56
+      input      :
+        (empty)
+      output     :
+        (empty)
+
+  [13] llm   ↩ allow  target=openai tool=—
+      stream-id  : 1777239787341-0
+      ts         : 1777239787
+      agent      : agent-sdk2
+      session    : 50e4909a-d678-4242-abb0-cd5801398a78
+      trace_id   : a87a331f630d5f7c5ea4d552e3b600b6
+      span_id    : 9558ecd4d34f3935
+      llm-flags  : synthesis (input had tool results)
+      input      :
+        {"messages": [{"content": "You are a task-dispatcher assistant. When asked for weather, call web_search with the query you are given. When asked to read mail, call dummy_email with the person name. Return a concise, factual answer with the result.", "role": "system"}, {"content": "Use web_search to find the current weather in London, UK. Summarise the result in one or two sentences.", "role": "user"}, {"content": null, "role": "assistant", "tool_calls": [{"type": "function", "id": "call_ITACBqNjpvAPke0geREk17Wf", "function": {"name": "web_search", "arguments": "{\"query\": \"current weather in London, UK\"}"}}]}, {"content": [{"type": "text", "text": "Title: Weather in London, UK\nURL: https://www.weatherapi.com/\nContent: {'location': {'name': 'London', 'region': 'City of London, Greater London', 'country': 'United Kingdom', 'lat': 51.5171, 'lon': -0.1062, 'tz_id': 'Europe/London', 'localtime_epoch': 1777239748, 'localtime': '2026-04-26 22:42'}, 'current': {'last_updated_epoch': 1777239000, 'last_updated': '2026-04-26 22:30', 'temp_c': 12.3, 'temp_f': 54.1, 'is_day': 0, 'condition': {'text': 'Overcast', 'icon': '//cdn.weatherapi.com/weather/64x64/night/122.png', 'code': 1009}, 'wind_mph': 6.7, 'wind_kph': 10.8, 'wind_degree': 98, 'wind_dir': 'E', 'pressure_mb': 1024.0, 'pressure_in': 30.24, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 67, 'cloud': 100, 'feelslike_c': 11.3, 'feelslike_f': 52.3, 'windchill_c': 9.3, 'windchill_f': 48.8, 'heatindex_c': 10.7, 'heatindex_f': 51.2, 'dewpoint_c': 4.9, 'dewpoint_f': 40.9, 'vis_km': 10.0, 'vis_miles': 6.0, 'uv': 0.0, 'gust_mph': 9.2, 'gust_kph': 14.9}}\n\nTitle: London Weather 26 April 2026: Will It Be Sunshine or Showers?\nURL: https://www.youtube.com/watch?v=hn_xI0Y_5Fk\nContent: London Weather 26 April 2026: Will It Be Sunshine or Showers? 1 ... \u2013 Met Office weather forecast UK. Met Office - UK Weather. New. 53K\n\nTitle: London, London, United Kingdom Monthly Weather | AccuWeather\nURL: https://www.accuweather.co
+      output     :
+        {
+          "id": "chatcmpl-DZ1XmS5p0iTPobOtkmbhsRaYYev7f",
+          "object": "chat.completion",
+          "created": 1777239786,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "The current weather in London, UK is overcast with a temperature of 12.3°C (54.1°F). It is nighttime with a wind speed of 6.7 mph coming from the east and humidity at 67%.",
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1075,
+            "completion_tokens": 49,
+            "total_tokens": 1124,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_0361aa33cd"
+        }
+
+
+  shared trace_ids across ['agent-sdk', 'agent-sdk2']: ['a87a331f630d5f7c5ea4d552e3b600b6']

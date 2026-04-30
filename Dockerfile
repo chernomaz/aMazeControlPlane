@@ -1,18 +1,25 @@
-# Single-container aMaze platform image: redis + orchestrator + proxy under
+# Single-container aMaze platform image: jaeger + orchestrator + proxy under
 # supervisord. Built from the repo root; see docker/docker-compose.yml for
-# the runtime wiring (networks, CA volume, Redis AOF volume).
+# the runtime wiring (networks, CA volume). Redis runs in its own container.
 #
 #   docker build -f Dockerfile -t amaze/platform:dev .
 
 FROM python:3.12-slim
 
-# --- System deps: redis, supervisord, tools for diagnostics ---------------
+# --- System deps: supervisord, tools for diagnostics ----------------------
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      redis-server \
       supervisor \
       curl \
+      wget \
  && rm -rf /var/lib/apt/lists/*
+
+RUN wget -qO /tmp/jaeger.tar.gz \
+      https://github.com/jaegertracing/jaeger/releases/download/v1.57.0/jaeger-1.57.0-linux-amd64.tar.gz \
+ && tar -xzf /tmp/jaeger.tar.gz -C /tmp/ \
+ && mv /tmp/jaeger-1.57.0-linux-amd64/jaeger-all-in-one /usr/local/bin/jaeger-all-in-one \
+ && chmod +x /usr/local/bin/jaeger-all-in-one \
+ && rm -rf /tmp/jaeger.tar.gz /tmp/jaeger-1.57.0-linux-amd64
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -48,9 +55,9 @@ RUN groupadd --system amaze \
 # Data dirs for redis AOF + mitmproxy CA. These are declared as VOLUMEs so
 # that named volumes (declared in docker/docker-compose.yml) can persist
 # state across container restarts. Ownership handed to the amaze user.
-RUN mkdir -p /data/redis /opt/mitmproxy /var/log/amaze \
- && chown -R amaze:amaze /data /opt/mitmproxy /var/log/amaze /app
-VOLUME ["/data/redis", "/opt/mitmproxy"]
+RUN mkdir -p /opt/mitmproxy /var/log/amaze /data/jaeger/data /data/jaeger/keys \
+ && chown -R amaze:amaze /opt/mitmproxy /var/log/amaze /app /data
+VOLUME ["/opt/mitmproxy"]
 
 ENV HOME=/opt/mitmproxy
 

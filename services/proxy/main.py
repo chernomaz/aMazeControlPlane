@@ -7,15 +7,29 @@ Launched by supervisord as:
              --set confdir=/opt/mitmproxy \
              -s services/proxy/main.py
 
-mitmdump imports this module and calls `addons = [...]`. We register:
+Addon chain (in order):
   1. SessionIdentity — bearer → agent_id, strips spoofed x-amaze-caller.
-  2. PolicyEnforcer  — the single decision point; deny or inject caller.
-  3. Counters        — request+token metrics; does not gate traffic.
+  2. Tracer          — opens OTel span (request) BEFORE PolicyEnforcer so
+                       even early denials carry a trace_id in the audit log.
+                       Closes + exports the span on response.
+  3. PolicyEnforcer  — allowlist checks + per-turn limit pre-checks.
+                       Sets amaze_kind/amaze_target/amaze_mcp_tool that
+                       downstream addons rely on.
+  4. GraphEnforcer   — strict step ordering + atomic loop-limit reservation
+                       (request hook); finalize / release reservation
+                       (response hook based on 2xx vs non-2xx).
+  5. StreamBlocker   — injects "stream": false into LLM request bodies.
+  6. Counters        — RTS time-series metrics + per-turn integer counters.
+  7. AuditLog        — XADD one record per call to Redis Streams (with
+                       trace_id, alert, indirect, has_tool_calls_input).
+  8. Router          — resolve logical target name → registered host:port
+                       from Redis; rewrite flow.request.host + port before
+                       mitmproxy opens the upstream connection. LLM flows
+                       are a no-op (forwarded to real provider as-is).
 
-FailClosed wraps the three addons: if any `request` / `response` coroutine
-raises unexpectedly, the wrapper turns the flow into a 403 response.
-Without this, mitmproxy would log the exception and pass the request
-through — which is exactly the aMaze-audit fail-open bug we are fixing.
+FailClosed wraps every addon: if any `request` coroutine raises, the
+wrapper turns the flow into a 403. Without this, mitmproxy passes through
+on exception — the fail-open bug we are fixing.
 """
 from __future__ import annotations
 
@@ -26,10 +40,15 @@ from typing import Any
 
 from mitmproxy import http
 
+from services.proxy.audit_log import AuditLog
 from services.proxy.counters import Counters
 from services.proxy.deny import deny
 from services.proxy.enforcer import PolicyEnforcer
+from services.proxy.graph_enforcer import GraphEnforcer
+from services.proxy.router import Router
 from services.proxy.session import SessionIdentity
+from services.proxy.stream_blocker import StreamBlocker
+from services.proxy.tracer import Tracer
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -78,7 +97,23 @@ class FailClosed:
 
 
 addons = [
+    # Order matters. SessionIdentity resolves the bearer first so every
+    # downstream addon has agent_id + session_id available.
     FailClosed(SessionIdentity(), "session"),
+    # Tracer runs BEFORE PolicyEnforcer so that even when the enforcer
+    # denies (short-circuiting the chain), the span has already been opened
+    # and the audit record can be tagged with the conversation's trace_id.
+    # Without this, denied records had empty trace_ids and were invisible
+    # in the traces UI when users tried to debug "why did this fail?".
+    FailClosed(Tracer(), "tracer"),
     FailClosed(PolicyEnforcer(), "enforcer"),
+    FailClosed(GraphEnforcer(), "graph"),
+    FailClosed(StreamBlocker(), "stream_blocker"),
     FailClosed(Counters(), "counters"),
+    FailClosed(AuditLog(), "audit_log"),
+    # Router always runs last — after all enforcement and audit. If any
+    # earlier addon denied the request, the FailClosed guard above skips
+    # Router. The audit record therefore always records the logical name
+    # (e.g. "agent-sdk1"), never the resolved IP.
+    FailClosed(Router(), "router"),
 ]

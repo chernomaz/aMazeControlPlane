@@ -1,0 +1,31 @@
+# Incremental build for test environments where internet access is not available
+# during docker build. Layers code changes on top of the existing platform
+# image, skipping the Jaeger download that the main Dockerfile performs.
+#
+# Prerequisite: amaze-amaze:latest must exist locally (contains Jaeger binary).
+#   If Docker has pruned it, restore it from the saved tarball:
+#     ./scripts/load-base-image.sh
+#   The tarball lives at /home/ubuntu/docker-images/amaze-platform-base.tar.gz
+#   and was saved with:
+#     docker save amaze-amaze:latest | gzip > /home/ubuntu/docker-images/amaze-platform-base.tar.gz
+#
+# Usage:
+#   docker build -f Dockerfile.incremental -t amaze-amaze:latest .
+#
+# This image is functionally identical to one built with the main Dockerfile,
+# except it reuses the Jaeger binary that was installed when the base image
+# was originally built.
+
+FROM amaze-amaze:latest
+
+# Ensure current requirements are installed (base image may predate additions)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -q -r /app/requirements.txt
+
+# Replace only the files that changed in S3
+COPY services/ /app/services/
+COPY config/   /app/config/
+
+# Update supervisord config so REDIS_URL is read from the container environment
+# (not hardcoded to 127.0.0.1:6379 which overrides the compose-level setting)
+COPY docker/supervisord.conf /etc/supervisor/supervisord.conf

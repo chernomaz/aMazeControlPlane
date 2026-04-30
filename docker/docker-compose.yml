@@ -1,61 +1,77 @@
-# Top-level compose for the single-container aMaze platform.
+# Top-level compose for the aMaze platform.
 #
-# What runs where:
+# Network model:
+#   No internal-bridge isolation. The platform exposes its proxy + orchestrator
+#   ports to the host. Agents (running anywhere — same host, different host,
+#   different network) connect by IP/DNS via HTTP_PROXY / AMAZE_ORCHESTRATOR_URL.
 #
-#   amaze (this container)    — redis + orchestrator + proxy under supervisord.
-#                               Straddles agent-net, mcp-net, egress.
+#   On the same host, agent containers reach the platform via
+#   `host.docker.internal:<port>` (extra_hosts mapping in agent compose handles
+#   Linux). On a different host, agents set the public/LAN address of the
+#   platform.
 #
-#   agent containers          — user-started, outside our control. Must attach
-#                               to amaze-agent-net and call POST /register on
-#                               the orchestrator at boot to obtain a bearer
-#                               token. See docker/Dockerfile.agent-base for a
-#                               ready-made base image.
+# Compose:
+#   docker compose -f docker/docker-compose.yml up
 #
-#   MCP containers            — same model. Attach to amaze-mcp-net, call
-#                               POST /register?kind=mcp on the orchestrator to
-#                               announce name + tool list. See
-#                               docker/Dockerfile.mcp-base.
-#
-# The proxy is the only node that can cross from agent-net to mcp-net and the
-# only node with a route to the public internet. Orchestrator does NOT spawn
-# sibling containers — no Docker socket mount is needed or wanted.
-#
-# Compose with the network definitions:
-#   docker compose -f docker/docker-compose.yml -f docker/compose.networks.yml up
+# Layer the agents on top:
+#   docker compose -f docker/docker-compose.yml -f examples/compose.yml up
 
 name: amaze
 
 services:
+  amaze-redis:
+    image: redis/redis-stack-server:latest
+    container_name: amaze-redis
+    ports:
+      # Bind to localhost only — not exposed beyond the host.
+      # Platform reaches Redis via Docker DNS: redis://amaze-redis:6379
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - amaze-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   amaze:
     build:
       context: ..
       dockerfile: Dockerfile
     container_name: amaze-platform
-    networks:
-      - amaze-agent-net
-      - amaze-mcp-net
-      - amaze-egress
+    extra_hosts:
+      # Lets the platform's proxy reach agent A2A endpoints and Redis via
+      # host.docker.internal on Linux (Docker Desktop resolves natively).
+      - "host.docker.internal:host-gateway"
     ports:
-      # Orchestrator HTTP: POST /register, GET /resolve/*, stats endpoints.
-      - "8001:8001"
-      # Proxy is reachable by siblings over the internal nets by DNS name
-      # `amaze`. Not exposed to the host.
+      - "8001:8001"     # orchestrator
+      - "8080:8080"     # mitmproxy — agents' HTTP_PROXY target
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
     volumes:
-      # Named volume for the mitmproxy CA. Written inside the proxy process
-      # at /opt/mitmproxy on first boot; user-started sibling containers
-      # mount this volume read-only at /etc/amaze/ca so they trust the
-      # proxy's re-signed certs.
       - amaze-proxy-ca:/opt/mitmproxy
-      # Redis AOF.
-      - amaze-redis-data:/data/redis
+      - amaze-jaeger-data:/data/jaeger
     environment:
-      AMAZE_PROXY_URL: http://amaze:8080
-      AMAZE_PROXY_CA_VOLUME: amaze-proxy-ca
+      REDIS_URL: redis://amaze-redis:6379
+      AMAZE_PROXY_URL: http://localhost:8080
+    depends_on:
+      amaze-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  amaze-ui:
+    build:
+      context: ..
+      dockerfile: Dockerfile.ui
+    container_name: amaze-ui
+    ports:
+      - "5173:80"      # browser → http://localhost:5173
+    depends_on:
+      - amaze
     restart: unless-stopped
 
 volumes:
   amaze-proxy-ca:
   amaze-redis-data:
-
-# Networks are defined in docker/compose.networks.yml. Compose them together
-# at `docker compose up` time.
+  amaze-jaeger-data:

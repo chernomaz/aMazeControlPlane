@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>aMaze Control Plane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg:#0b1020; --panel:#121a2b; --panel2:#18233a;
+    --line:#2b3a59; --muted:#9fb0d1; --text:#e8eefc;
+    --green:#1fbf75; --yellow:#f2b94b; --red:#e05252;
+    --blue:#5da9ff; --violet:#a97cff; --cyan:#43d1c6;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:Inter,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:var(--panel); }
+  ::-webkit-scrollbar-thumb { background:var(--line); border-radius:3px; }
+
+  /* Layout */
+  .sidebar { width:230px; min-height:100vh; background:var(--panel); border-right:1px solid var(--line); position:fixed; top:0; left:0; bottom:0; display:flex; flex-direction:column; z-index:10; }
+  .main { margin-left:230px; min-height:100vh; padding:28px 32px; }
+
+  /* Sidebar items */
+  .nav-item { display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; border-radius:8px; margin:2px 8px; color:var(--muted); font-size:13px; font-weight:500; transition:all .15s; user-select:none; }
+  .nav-item:hover { background:var(--panel2); color:var(--text); }
+  .nav-item.active { background:rgba(93,169,255,.12); color:var(--blue); }
+
+  /* Cards */
+  .card { background:linear-gradient(180deg, var(--panel) 0%, #0f1627 100%); border:1px solid var(--line); border-radius:14px; padding:20px; }
+  .card-sm { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .section-h { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:10px; }
+
+  /* Tables */
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:10px 12px; background:var(--panel2); text-align:left; white-space:nowrap; }
+  th:first-child { border-radius:8px 0 0 8px; }
+  th:last-child { border-radius:0 8px 8px 0; }
+  td { padding:10px 12px; border-bottom:1px solid rgba(43,58,89,.5); vertical-align:middle; }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:rgba(255,255,255,.02); }
+  tr.clickable { cursor:pointer; }
+  tr.clickable:hover td { background:rgba(93,169,255,.05); }
+  tr.highlighted td { background:rgba(93,169,255,.15) !important; outline:2px solid var(--blue); }
+
+  /* Badges */
+  .badge { display:inline-flex; align-items:center; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .badge-green { background:rgba(31,191,117,.15); color:#6de8ae; }
+  .badge-red { background:rgba(224,82,82,.16); color:#ffb3b3; }
+  .badge-blue { background:rgba(93,169,255,.16); color:#9fd0ff; }
+  .badge-violet { background:rgba(169,124,255,.16); color:#cab0ff; }
+  .badge-cyan { background:rgba(67,209,198,.18); color:#8ef1e6; }
+  .badge-yellow { background:rgba(242,185,75,.14); color:#f5cc6e; }
+  .badge-muted { background:rgba(159,176,209,.1); color:var(--muted); }
+
+  /* Buttons */
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; border:none; transition:all .15s; outline:none; }
+  .btn:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+  .btn-primary { background:var(--blue); color:#0b1020; }
+  .btn-primary:hover { background:#7dc0ff; }
+  .btn-ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .btn-ghost:hover { background:var(--panel2); color:var(--text); }
+  .btn-danger { background:rgba(224,82,82,.18); color:var(--red); border:1px solid rgba(224,82,82,.3); }
+  .btn-danger:hover { background:rgba(224,82,82,.28); }
+  .btn-success { background:rgba(31,191,117,.2); color:var(--green); border:1px solid rgba(31,191,117,.35); }
+  .btn-success:hover { background:rgba(31,191,117,.3); }
+  .btn-sm { padding:5px 10px; font-size:12px; }
+
+  /* Inputs */
+  .input { background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--text); padding:8px 12px; font-size:13px; font-family:Inter,sans-serif; outline:none; width:100%; transition:border-color .15s; }
+  .input:focus { border-color:var(--blue); }
+  .input::placeholder { color:var(--muted); }
+  select.input { cursor:pointer; }
+  .label { display:block; font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+
+  /* Toggle pill */
+  .toggle-group { display:inline-flex; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .toggle-btn { padding:6px 14px; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer; border:none; background:transparent; color:var(--muted); transition:all .2s; }
+  .toggle-btn.active { background:var(--blue); color:#0b1020; }
+  .toggle-btn.active.green { background:var(--green); }
+  .toggle-btn.active.red { background:var(--red); color:#fff; }
+
+  /* Modal */
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:100; display:none; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+  .modal-overlay.open { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:28px; max-height:90vh; overflow-y:auto; box-shadow:0 25px 60px rgba(0,0,0,.5); }
+  .modal-lg { width:min(700px,95vw); }
+  .modal-sm { width:min(440px,95vw); }
+
+  /* Tab panels */
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  /* Top bar */
+  .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; gap:16px; }
+  .page-title { font-size:22px; font-weight:800; letter-spacing:-.3px; }
+  .page-sub { color:var(--muted); font-size:13px; margin-top:2px; }
+
+  /* Code blocks */
+  .code-block { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#d7e2ff; overflow:auto; max-height:160px; white-space:pre-wrap; word-break:break-word; }
+  .code-cell { font-family:'JetBrains Mono',monospace; background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:4px 7px; font-size:11px; max-width:260px; max-height:80px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#dce6ff; display:block; }
+
+  /* KPI card */
+  .kpi { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:16px 18px; cursor:pointer; transition:all .15s; }
+  .kpi:hover { border-color:var(--blue); transform:translateY(-1px); }
+  .kpi-label { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; }
+  .kpi-value { font-size:28px; font-weight:800; margin-top:8px; line-height:1; }
+  .kpi-foot { font-size:11px; color:var(--muted); margin-top:6px; }
+  .kpi-tight { padding:10px 14px; }
+  .kpi-tight .kpi-label { font-size:10px; }
+  .kpi-tight .kpi-value { font-size:22px; margin-top:4px; }
+  .kpi-tight .kpi-foot { font-size:10px; margin-top:3px; }
+
+  /* Agent list card */
+  .agent-card { padding:12px 14px; border-radius:10px; border:1px solid var(--line); cursor:pointer; transition:all .15s; margin-bottom:8px; background:var(--panel2); }
+  .agent-card:hover { border-color:var(--blue); background:rgba(93,169,255,.05); }
+  .agent-card.selected { border-color:var(--blue); background:rgba(93,169,255,.08); }
+
+  /* Chart wrap */
+  .chart-wrap { background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:16px; }
+
+  /* Chip */
+  .chip { display:inline-flex; align-items:center; gap:5px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:12px; color:var(--muted); }
+  .chip-close { cursor:pointer; color:var(--muted); margin-left:2px; }
+  .chip-close:hover { color:var(--red); }
+
+  /* Graph canvas */
+  .graph-canvas { background:var(--panel2); border:1px solid var(--line); border-radius:12px; position:relative; overflow:hidden; min-height:300px; }
+  .graph-node { position:absolute; border-radius:10px; padding:9px 14px; font-size:12px; font-weight:600; cursor:pointer; user-select:none; border:2px solid transparent; transition:all .15s; white-space:nowrap; }
+  .graph-node.selected { border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.15); }
+  .graph-node.llm { background:rgba(93,169,255,.2); color:var(--blue); border-color:rgba(93,169,255,.4); }
+  .graph-node.tool { background:rgba(67,209,198,.18); color:var(--cyan); border-color:rgba(67,209,198,.35); }
+  .graph-node.agent-call { background:rgba(169,124,255,.18); color:var(--violet); border-color:rgba(169,124,255,.35); }
+  .graph-node.finish { background:rgba(31,191,117,.15); color:var(--green); border-color:rgba(31,191,117,.3); }
+  .graph-node.finish.disconnected { border-color:var(--red); box-shadow:0 0 0 3px rgba(224,82,82,.15); animation:pulseErr 1.6s infinite; }
+  @keyframes pulseErr { 0%,100% { box-shadow:0 0 0 3px rgba(224,82,82,.15); } 50% { box-shadow:0 0 0 6px rgba(224,82,82,.3); } }
+  .edge-to-finish.hidden { display:none; }
+  .graph-node.start { background:rgba(242,185,75,.14); color:var(--yellow); border-color:rgba(242,185,75,.3); }
+
+  /* Expand row */
+  .expand-row { display:none; }
+  .expand-row.open { display:table-row; }
+
+  /* Trace detail page (full-screen overlay) */
+  .page-overlay { position:fixed; inset:0; background:var(--bg); z-index:80; overflow-y:auto; padding:24px 32px; display:none; }
+  .page-overlay.open { display:block; }
+
+  /* Time picker */
+  .time-picker { padding:12px 16px; border-bottom:1px solid var(--line); }
+  .time-pill { display:inline-flex; padding:5px 0; border-radius:8px; background:var(--panel2); border:1px solid var(--line); width:100%; }
+  .time-opt { flex:1; text-align:center; padding:6px 0; font-size:11px; font-weight:600; color:var(--muted); cursor:pointer; transition:all .15s; }
+  .time-opt.active { background:var(--blue); color:#0b1020; border-radius:6px; margin:0 2px; }
+
+  /* Sequence diagram */
+  .seq-step { cursor:pointer; }
+  .seq-step:hover line, .seq-step:hover path { opacity:.8; }
+  .scroll-x { overflow-x:auto; }
+
+  /* Empty state */
+  .empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px 20px; color:var(--muted); text-align:center; gap:12px; }
+
+  /* Status dot */
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div style="padding:18px 16px 14px;">
+    <div style="font-size:18px; font-weight:800; letter-spacing:-.5px; color:var(--blue);">aMaze</div>
+    <div style="font-size:11px; color:var(--muted); margin-top:2px;">Control Plane</div>
+  </div>
+
+  <nav style="padding:12px 0; flex:1;">
+    <div class="nav-item active" onclick="showTab('llm')" id="nav-llm">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+      LLM Providers
+    </div>
+    <div class="nav-item" onclick="showTab('mcp')" id="nav-mcp">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+      MCP Servers
+    </div>
+    <div class="nav-item" onclick="showTab('agents')" id="nav-agents">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Agents
+    </div>
+
+    <!-- Agent list (visible only when Agents tab is active) -->
+    <div id="sidebar-agent-list" style="display:none; padding:8px 12px 14px; border-bottom:1px solid var(--line); margin-bottom:8px;">
+      <input type="text" class="input" placeholder="🔍 Search…" style="margin-bottom:10px; padding:7px 10px; font-size:12px;" oninput="filterAgents(this.value)">
+      <div style="display:flex; gap:4px; margin-bottom:10px; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:3px;">
+        <button class="sb-filter-btn active" onclick="filterAgentStatus('all',this)" style="flex:1; padding:5px; font-size:11px; font-weight:600; background:var(--blue); color:#0b1020; border:none; border-radius:5px; cursor:pointer;">All</button>
+        <button class="sb-filter-btn" onclick="filterAgentStatus('pending',this)" style="flex:1; padding:5px; font-size:11px; font-weight:600; background:transparent; color:var(--muted); border:none; border-radius:5px; cursor:pointer;">Pending</button>
+        <button class="sb-filter-btn" onclick="filterAgentStatus('approved',this)" style="flex:1; padding:5px; font-size:11px; font-weight:600; background:transparent; color:var(--muted); border:none; border-radius:5px; cursor:pointer;">Approved</button>
+      </div>
+      <div id="agent-list" style="display:flex; flex-direction:column; gap:6px; max-height:calc(100vh - 360px); overflow-y:auto; padding-right:2px;">
+        <!-- research-agent: approved + has policy -->
+        <div class="agent-card selected" data-agent="research-agent" data-status="approved" onclick="selectAgent('research-agent', this)" style="padding:9px 11px; margin-bottom:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <span style="font-weight:700; font-size:12.5px;">research-agent</span>
+            <span class="dot" style="background:var(--green);"></span>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <span class="badge badge-blue" style="font-size:9px; padding:1px 6px;">strict</span>
+            <span class="badge badge-green" style="font-size:9px; padding:1px 6px;">policy ✓</span>
+          </div>
+        </div>
+
+        <div class="agent-card" data-agent="email-agent" data-status="approved" onclick="selectAgent('email-agent', this)" style="padding:9px 11px; margin-bottom:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <span style="font-weight:700; font-size:12.5px;">email-agent</span>
+            <span class="dot" style="background:var(--green);"></span>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <span class="badge badge-cyan" style="font-size:9px; padding:1px 6px;">flexible</span>
+            <span class="badge badge-green" style="font-size:9px; padding:1px 6px;">policy ✓</span>
+          </div>
+        </div>
+
+        <div class="agent-card" data-agent="scraper-bot" data-status="approved" onclick="selectAgent('scraper-bot', this)" style="padding:9px 11px; margin-bottom:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <span style="font-weight:700; font-size:12.5px;">scraper-bot</span>
+            <span class="dot" style="background:var(--muted);"></span>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <span class="badge badge-yellow" style="font-size:9px; padding:1px 6px;">⚠ no policy</span>
+          </div>
+        </div>
+
+        <div class="agent-card" data-agent="data-fetcher" data-status="pending" onclick="selectAgent('data-fetcher', this)" style="padding:9px 11px; margin-bottom:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <span style="font-weight:700; font-size:12.5px;">data-fetcher</span>
+            <span class="dot" style="background:var(--yellow);"></span>
+          </div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap;">
+            <span class="badge badge-yellow" style="font-size:9px; padding:1px 6px;">⏳ pending</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-item" onclick="showTab('traces')" id="nav-traces">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Traces
+    </div>
+    <div class="nav-item" onclick="showTab('alerts')" id="nav-alerts">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Alerts
+      <span class="badge badge-red" style="margin-left:auto; font-size:10px; padding:1px 7px;">30</span>
+    </div>
+  </nav>
+
+  <div style="padding:12px 16px; border-top:1px solid var(--line); font-size:11px; color:var(--muted);">
+    <div style="display:flex; align-items:center; gap:6px;">
+      <span class="dot" style="background:var(--green);"></span>
+      Platform online
+    </div>
+    <div style="margin-top:4px;">Redis · Proxy · Jaeger</div>
+  </div>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<main class="main">
+
+<!-- ─────── LLM TAB ─────── -->
+<div class="tab-panel active" id="tab-llm">
+  <div class="topbar">
+    <div>
+      <div class="page-title">LLM Providers</div>
+      <div class="page-sub">Configure language models via LiteLLM — one interface for all providers</div>
+    </div>
+    <button class="btn btn-primary" onclick="openModal('modal-add-llm')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add LLM
+    </button>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Provider</th><th>Model</th><th>LiteLLM Key</th><th>Key Status</th><th>Base URL</th><th>Added</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="badge badge-blue">OpenAI</span></td>
+          <td style="font-family:'JetBrains Mono',monospace; font-size:12px;">gpt-4.1-mini</td>
+          <td style="font-family:monospace; font-size:12px; color:var(--muted);">openai/gpt-4.1-mini</td>
+          <td><span class="badge badge-green">✓ from .env</span></td>
+          <td style="color:var(--muted); font-size:12px;">—</td>
+          <td style="color:var(--muted); font-size:12px;">2026-04-20</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="openModal('modal-add-llm')">Edit</button></td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-violet">Anthropic</span></td>
+          <td style="font-family:'JetBrains Mono',monospace; font-size:12px;">claude-sonnet-4-6</td>
+          <td style="font-family:monospace; font-size:12px; color:var(--muted);">anthropic/claude-sonnet-4-6</td>
+          <td><span class="badge badge-green">✓ from .env</span></td>
+          <td style="color:var(--muted); font-size:12px;">—</td>
+          <td style="color:var(--muted); font-size:12px;">2026-04-20</td>
+          <td><button class="btn btn-ghost btn-sm">Edit</button></td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-cyan">Google</span></td>
+          <td style="font-family:'JetBrains Mono',monospace; font-size:12px;">gemini-2.0-flash</td>
+          <td style="font-family:monospace; font-size:12px; color:var(--muted);">gemini/gemini-2.0-flash</td>
+          <td><span class="badge badge-yellow">⚠ key missing</span></td>
+          <td style="color:var(--muted); font-size:12px;">—</td>
+          <td style="color:var(--muted); font-size:12px;">2026-04-22</td>
+          <td><button class="btn btn-ghost btn-sm">Edit</button></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <div class="section-h">LiteLLM Config Preview</div>
+    <div class="code-block">model_list:
+  - model_name: gpt-4.1-mini
+    litellm_params:
+      model: openai/gpt-4.1-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_key: os.environ/GEMINI_API_KEY   # ⚠ not set</div>
+  </div>
+</div>
+
+<!-- ─────── MCP TAB ─────── -->
+<div class="tab-panel" id="tab-mcp">
+  <div class="topbar">
+    <div>
+      <div class="page-title">MCP Servers</div>
+      <div class="page-sub">MCP servers self-register with the Orchestrator on startup. Approve a server to make it usable by agents.</div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <input type="text" class="input" placeholder="🔍 Search servers or tools…" style="width:280px;">
+      <select class="input" style="width:160px;">
+        <option>All status</option>
+        <option>Pending</option>
+        <option>Approved</option>
+        <option>Disabled</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="mcp-list" style="display:flex; flex-direction:column; gap:14px;">
+    <!-- web-tools (approved) -->
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="width:38px; height:38px; border-radius:10px; background:rgba(67,209,198,.12); display:flex; align-items:center; justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#43d1c6" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+          </div>
+          <div>
+            <div style="font-size:15px; font-weight:700;">web-tools</div>
+            <div style="font-size:12px; color:var(--muted); margin-top:2px;">
+              <span class="badge badge-blue" style="font-size:10px;">stdio</span>
+              <span style="margin-left:6px; font-family:monospace;">uvx mcp-server-web-tools</span>
+              · registered 2026-04-12
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="badge badge-green">● approved</span>
+          <button class="btn btn-danger btn-sm">Disable</button>
+        </div>
+      </div>
+      <div class="section-h">Available Tools (3)</div>
+      <table style="font-size:12px;">
+        <thead><tr><th style="width:160px;">Tool</th><th>Description</th><th style="width:80px;">Calls (24h)</th></tr></thead>
+        <tbody>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">web_search</td><td style="color:var(--muted);">Search the web using a query string. Returns ranked results with titles, URLs, and snippets.</td><td>89</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">fetch_url</td><td style="color:var(--muted);">Fetch the contents of a URL and return as markdown. Supports timeout and max-size options.</td><td>44</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">summarize</td><td style="color:var(--muted);">Summarize a block of text to a target length. Preserves key facts and named entities.</td><td>18</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- email-tools (approved) -->
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="width:38px; height:38px; border-radius:10px; background:rgba(67,209,198,.12); display:flex; align-items:center; justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#43d1c6" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <div>
+            <div style="font-size:15px; font-weight:700;">email-tools</div>
+            <div style="font-size:12px; color:var(--muted); margin-top:2px;">
+              <span class="badge badge-cyan" style="font-size:10px;">SSE</span>
+              <span style="margin-left:6px; font-family:monospace;">http://email-mcp:8200/sse</span>
+              · registered 2026-04-12
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="badge badge-green">● approved</span>
+          <button class="btn btn-danger btn-sm">Disable</button>
+        </div>
+      </div>
+      <div class="section-h">Available Tools (3)</div>
+      <table style="font-size:12px;">
+        <thead><tr><th style="width:160px;">Tool</th><th>Description</th><th style="width:80px;">Calls (24h)</th></tr></thead>
+        <tbody>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">send_email</td><td style="color:var(--muted);">Send an email to a recipient. Requires: to, subject, body. Optional: cc, attachments.</td><td>4</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">read_inbox</td><td style="color:var(--muted);">Read emails from inbox. Supports filtering by sender, subject, date range and unread status.</td><td>12</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">dummy_email</td><td style="color:var(--muted);">Return a simulated email for a named person. Used for testing and demo purposes only.</td><td>31</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- github-tools (PENDING) -->
+    <div class="card" style="border-color:rgba(242,185,75,.3); background:linear-gradient(180deg, rgba(242,185,75,.04) 0%, var(--panel) 100%);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="width:38px; height:38px; border-radius:10px; background:rgba(242,185,75,.12); display:flex; align-items:center; justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f2b94b" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          </div>
+          <div>
+            <div style="font-size:15px; font-weight:700;">github-tools</div>
+            <div style="font-size:12px; color:var(--muted); margin-top:2px;">
+              <span class="badge badge-blue" style="font-size:10px;">HTTP</span>
+              <span style="margin-left:6px; font-family:monospace;">http://github-mcp:8300/mcp</span>
+              · registered 2 minutes ago
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="badge badge-yellow">⏳ pending approval</span>
+          <button class="btn btn-danger btn-sm">Reject</button>
+          <button class="btn btn-success btn-sm" onclick="showToast('github-tools approved — agents can now use it','#1fbf75')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Approve
+          </button>
+        </div>
+      </div>
+      <div class="section-h">Available Tools (4) — review before approving</div>
+      <table style="font-size:12px;">
+        <thead><tr><th style="width:160px;">Tool</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">create_issue</td><td style="color:var(--muted);">Create a new issue in a GitHub repository. Required: repo, title, body.</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">list_pull_requests</td><td style="color:var(--muted);">List pull requests for a repository. Optional filters: state, author, base branch.</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">get_file_contents</td><td style="color:var(--muted);">Read a file from a repository at a specific ref. Returns content and metadata.</td></tr>
+          <tr><td style="font-family:monospace; font-weight:600; color:var(--cyan);">merge_pull_request</td><td style="color:var(--muted);">Merge a pull request. ⚠ Destructive — requires explicit policy permission.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ─────── AGENTS TAB ─────── -->
+<div class="tab-panel" id="tab-agents">
+  <!-- RIGHT: conditional view (tabbed for approved agents, full-card for pending). Agent list lives in the sidebar. -->
+  <div id="agent-right-panel">
+      <!-- Shared header (hidden when pending) -->
+      <div id="agent-header" style="margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; gap:16px;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:20px; font-weight:800;" id="dash-name">research-agent</span>
+            <span class="badge badge-green" id="dash-status">● running</span>
+            <span class="badge badge-blue" id="dash-mode">strict</span>
+            <span style="font-size:12px; color:var(--muted); font-family:monospace;" id="dash-url">http://research-agent:8100</span>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <!-- Time picker (matches Traces/Alerts style) -->
+            <div class="time-pill" style="display:inline-flex; padding:3px; border-radius:8px; background:var(--panel2); border:1px solid var(--line);">
+              <div class="time-opt" onclick="setDashTime(this,'1h')">1h</div>
+              <div class="time-opt active" onclick="setDashTime(this,'6h')">6h</div>
+              <div class="time-opt" onclick="setDashTime(this,'24h')">24h</div>
+              <div class="time-opt" onclick="setDashTime(this,'7d')">7d</div>
+              <div class="time-opt" onclick="openModal('modal-custom-time')" style="display:flex; align-items:center; gap:4px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Custom
+              </div>
+            </div>
+            <button class="btn btn-danger btn-sm">Remove</button>
+          </div>
+        </div>
+
+        <!-- Sub-tabs: Dashboard | Policy -->
+        <div style="display:flex; gap:4px; border-bottom:1px solid var(--line);">
+          <div class="agent-subtab active" id="subtab-dashboard" onclick="showAgentSubtab('dashboard')" style="padding:10px 18px; font-size:13px; font-weight:600; cursor:pointer; color:var(--blue); border-bottom:2px solid var(--blue); margin-bottom:-1px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px; margin-right:6px;"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+            Dashboard
+          </div>
+          <div class="agent-subtab" id="subtab-policy" onclick="showAgentSubtab('policy')" style="padding:10px 18px; font-size:13px; font-weight:600; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px; margin-right:6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Policy
+            <span class="badge badge-yellow" id="policy-tab-badge" style="margin-left:6px; font-size:9px; padding:1px 6px; display:none;">⚠ none</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dashboard view -->
+      <div id="view-dashboard">
+        <!-- Send message textbox -->
+        <div class="card-sm" style="margin-bottom:14px; padding:10px 12px; display:flex; gap:8px; align-items:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9fb0d1" stroke-width="2" style="flex-shrink:0;"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          <input type="text" class="input" id="agent-msg-input" placeholder="Send a message to this agent…" style="border:none; background:transparent; flex:1; padding:6px 0;">
+          <button class="btn btn-primary btn-sm" onclick="sendAgentMessage()">
+            Send
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+
+        <!-- KPI cards row -->
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px;">
+          <div class="kpi kpi-tight">
+            <div class="kpi-label">Avg Latency</div>
+            <div class="kpi-value" style="color:var(--cyan);">4 820<span style="font-size:13px; font-weight:500; color:var(--muted);"> ms</span></div>
+            <div class="kpi-foot">p95: 9 200 ms</div>
+          </div>
+          <div class="kpi kpi-tight">
+            <div class="kpi-label">Tool Calls</div>
+            <div class="kpi-value" style="color:var(--green);">168</div>
+            <div class="kpi-foot">across 4 tools</div>
+          </div>
+          <div class="kpi kpi-tight">
+            <div class="kpi-label">Tokens Used</div>
+            <div class="kpi-value" style="color:var(--yellow);">128 k</div>
+            <div class="kpi-foot">budget: 200k</div>
+          </div>
+          <div class="kpi kpi-tight" onclick="showTab('alerts');filterAlertsByAgent('research-agent')">
+            <div class="kpi-label">Alerts</div>
+            <div class="kpi-value" style="color:var(--red);">5</div>
+            <div class="kpi-foot">↑ 2 today →</div>
+          </div>
+        </div>
+
+        <!-- Tabbed line chart: Calls Over Time | Latency per Call -->
+        <div class="chart-wrap" style="margin-bottom:18px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+            <div style="display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:-1px;">
+              <div class="chart-tab active" id="chart-tab-calls" onclick="switchChartTab('calls')" style="padding:8px 16px; font-size:12px; font-weight:700; cursor:pointer; color:var(--blue); border-bottom:2px solid var(--blue); text-transform:uppercase; letter-spacing:.06em;">Calls Over Time</div>
+              <div class="chart-tab" id="chart-tab-latency" onclick="switchChartTab('latency')" style="padding:8px 16px; font-size:12px; font-weight:700; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; text-transform:uppercase; letter-spacing:.06em;">Latency per Call</div>
+            </div>
+            <div style="font-size:11px; color:var(--muted);" id="chart-subtitle">last 24h, hourly buckets</div>
+          </div>
+          <canvas id="dash-calls-chart" width="900" height="130"></canvas>
+        </div>
+
+        <!-- 4 donut charts (compact) -->
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px;">
+          <div class="chart-wrap" style="padding:12px;">
+            <div class="section-h" style="margin-bottom:8px; font-size:10px;">Tokens / Call</div>
+            <canvas class="donut-canvas" id="donut-tokens" width="140" height="140" data-key="tokens"></canvas>
+            <div id="legend-tokens" class="donut-legend"></div>
+          </div>
+          <div class="chart-wrap" style="padding:12px;">
+            <div class="section-h" style="margin-bottom:8px; font-size:10px;">Tool Calls</div>
+            <canvas class="donut-canvas" id="donut-tools" width="140" height="140" data-key="tools"></canvas>
+            <div id="legend-tools" class="donut-legend"></div>
+          </div>
+          <div class="chart-wrap" style="padding:12px;">
+            <div class="section-h" style="margin-bottom:8px; font-size:10px;">Agent → Agent</div>
+            <canvas class="donut-canvas" id="donut-a2a" width="140" height="140" data-key="a2a"></canvas>
+            <div id="legend-a2a" class="donut-legend"></div>
+          </div>
+          <div class="chart-wrap" style="cursor:pointer; padding:12px;" onclick="showTab('alerts');filterAlertsByAgent('research-agent')">
+            <div class="section-h" style="margin-bottom:8px; font-size:10px;">Alerts <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted);">— click to drill</span></div>
+            <canvas class="donut-canvas" id="donut-alerts" width="140" height="140" data-key="alerts"></canvas>
+            <div id="legend-alerts" class="donut-legend"></div>
+          </div>
+        </div>
+
+        <!-- Recent traces -->
+        <div class="card">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <div class="section-h" style="margin:0;">Recent Traces</div>
+            <button class="btn btn-ghost btn-sm" onclick="showTab('traces');filterTracesByAgent('research-agent')">View all →</button>
+          </div>
+          <table>
+            <thead><tr><th>Trace ID</th><th>Started</th><th>Duration</th><th>LLM</th><th>Tools</th><th>Tokens</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">e369c9b3</span></td><td style="font-size:12px; color:var(--muted);">15:57:00</td><td style="font-family:monospace; font-size:12px;">5 859 ms</td><td>2</td><td>2</td><td>1 120</td><td><span class="badge badge-green">passed</span></td></tr>
+              <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--red);">a1b2c3d4</span></td><td style="font-size:12px; color:var(--muted);">15:42:18</td><td style="font-family:monospace; font-size:12px;">3 201 ms</td><td>1</td><td>3</td><td>820</td><td><span class="badge badge-red">violation</span></td></tr>
+              <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">7c3f9a21</span></td><td style="font-size:12px; color:var(--muted);">15:22:40</td><td style="font-family:monospace; font-size:12px;">6 103 ms</td><td>2</td><td>2</td><td>1 240</td><td><span class="badge badge-green">passed</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Policy view -->
+      <div id="view-policy" style="display:none;">
+        <!-- Card 1: Enforcement Mode -->
+        <div class="card" style="margin-bottom:14px;">
+          <div class="section-h" style="margin-bottom:12px;">Enforcement Mode</div>
+          <div style="display:grid; grid-template-columns:auto 1fr 1fr; gap:24px; align-items:center;">
+            <div>
+              <div class="toggle-group">
+                <button class="toggle-btn active" onclick="setMode(this,'strict'); switchPolicyMode('strict')">Strict</button>
+                <button class="toggle-btn" onclick="setMode(this,'flexible'); switchPolicyMode('flexible')">Flexible</button>
+              </div>
+              <div style="font-size:11px; color:var(--muted); margin-top:6px; max-width:160px;">Strict = ordered graph. Flexible = allowed set, any order.</div>
+            </div>
+            <div>
+              <div class="label">On Violation</div>
+              <div class="toggle-group">
+                <button class="toggle-btn active red">Block</button>
+                <button class="toggle-btn">Allow</button>
+              </div>
+            </div>
+            <div>
+              <div class="label">On Budget Exceeded</div>
+              <div class="toggle-group">
+                <button class="toggle-btn active red">Block</button>
+                <button class="toggle-btn">Allow</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Execution Graph (strict) OR Allowed Set (flexible) -->
+        <div class="card" style="margin-bottom:14px;" id="policy-graph-card">
+          <!-- STRICT view -->
+          <div id="policy-strict">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <div class="section-h" style="margin:0;">Execution Graph <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted);">— ordered, agent is always the start node</span></div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(93,169,255,.4); color:var(--blue);" onclick="addGraphNode('llm')">+ LLM</button>
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(67,209,198,.4); color:var(--cyan);" onclick="addGraphNode('tool')">+ MCP Tool</button>
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(169,124,255,.4); color:var(--violet);" onclick="addGraphNode('agent-call')">+ Agent</button>
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(31,191,117,.3); color:var(--green);" onclick="addGraphNode('finish')">+ Finish</button>
+              </div>
+            </div>
+            <div class="graph-canvas" id="graph-canvas" style="min-height:340px;">
+              <svg id="graph-svg" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <marker id="arrowB" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5da9ff" opacity=".8"/></marker>
+                  <marker id="arrowC" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#43d1c6" opacity=".8"/></marker>
+                  <marker id="arrowG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#1fbf75" opacity=".8"/></marker>
+                </defs>
+                <line x1="100" y1="60" x2="204" y2="60" stroke="#f2b94b" stroke-width="1.8" stroke-dasharray="5 3" opacity=".6" marker-end="url(#arrowB)"/>
+                <line x1="296" y1="60" x2="380" y2="120" stroke="#5da9ff" stroke-width="1.8" opacity=".7" marker-end="url(#arrowC)"/>
+                <line x1="500" y1="120" x2="380" y2="200" stroke="#43d1c6" stroke-width="1.8" opacity=".7" marker-end="url(#arrowC)"/>
+                <line class="edge-to-finish" id="edge-finish" x1="500" y1="200" x2="584" y2="260" stroke="#43d1c6" stroke-width="1.8" opacity=".7" marker-end="url(#arrowG)"/>
+              </svg>
+              <div class="graph-node start" style="left:20px; top:40px;" onclick="selectGraphNode(this,'agent')" title="The agent itself — always the start node in strict mode">⚡ agent (start)</div>
+              <div class="graph-node llm" style="left:210px; top:40px;" onclick="selectGraphNode(this,'llm')">LLM</div>
+              <div class="graph-node tool" style="left:386px; top:100px;" onclick="selectGraphNode(this,'tool')">tool:web_search</div>
+              <div class="graph-node tool" style="left:386px; top:180px;" onclick="selectGraphNode(this,'tool')">tool:dummy_email</div>
+              <div class="graph-node finish" id="finish-node" style="left:590px; top:240px;" onclick="selectGraphNode(this,'finish')" title="End-marker node — required in strict mode and must have at least one incoming connection">🏁 finish</div>
+              <!-- Demo helper: toggle finish connection to test validation -->
+              <button class="btn btn-ghost btn-sm" onclick="toggleFinishConnection()" style="position:absolute; bottom:10px; right:10px; font-size:11px; padding:4px 9px;" title="Demo: toggle the connection to finish to test save validation">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Toggle finish edge (demo)
+              </button>
+            </div>
+            <div id="node-config" style="display:none; margin-top:12px;" class="card-sm">
+              <div class="section-h">Step Configuration</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+                <div><label class="label">Callee ID</label><input type="text" class="input" id="node-callee" value="web_search"></div>
+                <div><label class="label">Max Loops</label><input type="number" class="input" id="node-loops" value="2"></div>
+                <div><label class="label">Next Steps</label><input type="text" class="input" id="node-next" value="dummy_email"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FLEXIBLE view -->
+          <div id="policy-flexible" style="display:none;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <div class="section-h" style="margin:0;">Allowed Capabilities <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted);">— any order, no connections required</span></div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(93,169,255,.4); color:var(--blue);" onclick="addFlexibleItem('llm')">+ LLM</button>
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(67,209,198,.4); color:var(--cyan);" onclick="addFlexibleItem('tool')">+ MCP Tool</button>
+                <button class="btn btn-ghost btn-sm" style="border-color:rgba(169,124,255,.4); color:var(--violet);" onclick="addFlexibleItem('agent')">+ Agent</button>
+              </div>
+            </div>
+
+            <!-- Agent self -->
+            <div class="card-sm" style="margin-bottom:12px; border-color:rgba(242,185,75,.4); background:rgba(242,185,75,.06); display:flex; align-items:center; gap:10px;">
+              <span class="badge badge-yellow" style="padding:4px 10px;">⚡ agent itself</span>
+              <span style="font-size:12px; color:var(--muted);">The agent is always present as the entry point</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+              <!-- Tools -->
+              <div class="card-sm">
+                <div class="label" style="margin-bottom:10px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#43d1c6" stroke-width="2" style="vertical-align:-1px; margin-right:4px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Tools</div>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--cyan);"> <span style="font-family:monospace; color:var(--cyan);">web_search</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--cyan);"> <span style="font-family:monospace; color:var(--cyan);">fetch_url</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--cyan);"> <span style="font-family:monospace; color:var(--cyan);">summarize</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--cyan);"> <span style="font-family:monospace; color:var(--cyan);">dummy_email</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--cyan);"> <span style="font-family:monospace; color:var(--cyan);">read_inbox</span></label>
+              </div>
+
+              <!-- Peer Agents -->
+              <div class="card-sm">
+                <div class="label" style="margin-bottom:10px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#a97cff" stroke-width="2" style="vertical-align:-1px; margin-right:4px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Peer Agents</div>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--violet);"> <span style="color:var(--violet); font-weight:600;">email-agent</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--violet);"> <span style="color:var(--violet); font-weight:600;">scraper-bot</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--violet);"> <span style="color:var(--violet); font-weight:600;">data-fetcher</span></label>
+              </div>
+
+              <!-- LLMs -->
+              <div class="card-sm">
+                <div class="label" style="margin-bottom:10px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#5da9ff" stroke-width="2" style="vertical-align:-1px; margin-right:4px;"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4"/></svg>LLM Models</div>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--blue);"> <span style="font-family:monospace; color:var(--blue);">gpt-4.1-mini</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--blue);"> <span style="font-family:monospace; color:var(--blue);">claude-sonnet-4-6</span></label>
+                <label style="display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--blue);"> <span style="font-family:monospace; color:var(--blue);">gemini-flash</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: rest of limits -->
+        <div class="card">
+
+          <!-- Token & call limits -->
+          <div class="section-h">Limits</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div>
+              <label class="label">Max Tokens / Turn</label>
+              <input type="number" class="input" value="10000">
+            </div>
+            <div>
+              <label class="label">Max Tool Calls / Turn</label>
+              <input type="number" class="input" value="20">
+            </div>
+            <div>
+              <label class="label">Max Agent Calls / Turn</label>
+              <input type="number" class="input" value="5">
+            </div>
+          </div>
+
+          <div class="label">Token Rate Limits</div>
+          <div id="rate-limits">
+            <div class="rate-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <select class="input" style="width:100px; flex-shrink:0;"><option>10m</option><option>1h</option><option>24h</option></select>
+              <input type="number" class="input" value="2000" placeholder="max tokens">
+              <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>
+            </div>
+            <div class="rate-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+              <select class="input" style="width:100px; flex-shrink:0;"><option>10m</option><option selected>1h</option><option>24h</option></select>
+              <input type="number" class="input" value="10000" placeholder="max tokens">
+              <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="addRateRow()">+ Add window</button>
+
+          <hr style="border:none; border-top:1px solid var(--line); margin:20px 0;">
+
+          <!-- Per-tool limits -->
+          <div class="section-h">Per-Tool Call Limits</div>
+          <table style="margin-bottom:8px; font-size:12px;">
+            <thead><tr><th>Tool</th><th style="width:120px;">Max / Turn</th><th style="width:60px;"></th></tr></thead>
+            <tbody id="tool-limits-body">
+              <tr><td style="font-family:monospace; color:var(--cyan);">web_search</td><td><input type="number" class="input" value="3" style="padding:5px 10px; font-size:12px;"></td><td><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td></tr>
+              <tr><td style="font-family:monospace; color:var(--cyan);">dummy_email</td><td><input type="number" class="input" value="1" style="padding:5px 10px; font-size:12px;"></td><td><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td></tr>
+            </tbody>
+          </table>
+          <button class="btn btn-ghost btn-sm" onclick="addToolLimit()">+ Add tool limit</button>
+
+          <hr style="border:none; border-top:1px solid var(--line); margin:24px 0 20px;">
+
+          <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button class="btn btn-ghost">Reset</button>
+            <button class="btn btn-primary" onclick="savePolicy()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Save Policy to Redis
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pending approval view -->
+      <div id="view-pending" style="display:none;">
+        <div class="card" style="text-align:center; padding:60px 40px;">
+          <div style="width:60px; height:60px; border-radius:50%; background:rgba(242,185,75,.12); margin:0 auto 18px; display:flex; align-items:center; justify-content:center;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f2b94b" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div style="font-size:18px; font-weight:700; margin-bottom:6px;" id="pending-name">data-fetcher</div>
+          <div style="color:var(--muted); font-size:13px; margin-bottom:8px;">This agent is awaiting approval</div>
+          <div style="font-family:monospace; font-size:12px; color:var(--muted); margin-bottom:24px;" id="pending-url">http://data-fetcher:8400</div>
+
+          <div class="card-sm" style="text-align:left; max-width:520px; margin:0 auto 24px;">
+            <div class="section-h" style="margin-bottom:8px;">Registration Details</div>
+            <div style="display:grid; grid-template-columns:120px 1fr; gap:8px; font-size:13px;">
+              <div style="color:var(--muted);">Registered</div><div>2026-04-25 14:02:18 (3 min ago)</div>
+              <div style="color:var(--muted);">Capabilities</div><div>scraping, html-parse, csv-export</div>
+              <div style="color:var(--muted);">Image</div><div style="font-family:monospace; font-size:12px;">amaze/data-fetcher:0.2.1</div>
+              <div style="color:var(--muted);">Bearer Token</div><div style="font-family:monospace; font-size:12px;">eyJhbGc…2cD9c</div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; justify-content:center;">
+            <button class="btn btn-danger">Reject</button>
+            <button class="btn btn-success" onclick="showToast('data-fetcher approved — configure policy to enable','#1fbf75')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Approve Agent
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+</div>
+
+<!-- ─────── TRACES TAB ─────── -->
+<div class="tab-panel" id="tab-traces">
+  <div class="topbar">
+    <div>
+      <div class="page-title">Traces</div>
+      <div class="page-sub">Execution traces across all agents</div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <!-- Time picker -->
+      <div class="time-pill" style="display:inline-flex; padding:3px; border-radius:8px; background:var(--panel2); border:1px solid var(--line);">
+        <div class="time-opt" onclick="setTracesTime(this,'1h')">1h</div>
+        <div class="time-opt active" onclick="setTracesTime(this,'6h')">6h</div>
+        <div class="time-opt" onclick="setTracesTime(this,'24h')">24h</div>
+        <div class="time-opt" onclick="setTracesTime(this,'7d')">7d</div>
+        <div class="time-opt" onclick="openModal('modal-custom-time')" style="display:flex; align-items:center; gap:4px;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Custom
+        </div>
+      </div>
+      <select class="input" style="width:180px;" id="traces-agent-picker" onchange="filterTracesByAgent(this.value)">
+        <option value="">All agents</option>
+        <option value="research-agent" selected>research-agent</option>
+        <option value="email-agent">email-agent</option>
+        <option value="scraper-bot">scraper-bot</option>
+      </select>
+      <button class="btn btn-ghost" onclick="openModal('modal-export')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+    </div>
+  </div>
+
+  <!-- Horizontal filter bar -->
+  <div class="card" style="padding:14px 18px; margin-bottom:14px;">
+    <div style="display:grid; grid-template-columns:1fr 1.4fr 1fr 1fr 1fr auto; gap:14px; align-items:end;">
+      <div>
+        <label class="label">Trace ID</label>
+        <input type="text" class="input" placeholder="e369c9b3…">
+      </div>
+      <div>
+        <label class="label">Status</label>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; padding-top:6px;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--green);"> Passed</label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--red);"> Violation</label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--yellow);"> Allowed</label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--muted);"> Aborted</label>
+        </div>
+      </div>
+      <div>
+        <label class="label">Duration (ms)</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="number" class="input" placeholder="min" value="0" style="font-size:12px; padding:8px 10px;">
+          <span style="color:var(--muted);">–</span>
+          <input type="number" class="input" placeholder="max" value="30000" style="font-size:12px; padding:8px 10px;">
+        </div>
+      </div>
+      <div>
+        <label class="label">Min Tokens</label>
+        <input type="number" class="input" placeholder="0">
+      </div>
+      <div>
+        <label class="label">Has Violation</label>
+        <select class="input"><option>Any</option><option>Only with</option><option>Only without</option></select>
+      </div>
+      <div>
+        <button class="btn btn-ghost" style="white-space:nowrap;">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <!-- Traces table -->
+    <div class="card">
+      <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">Showing <strong style="color:var(--text);">6</strong> traces · agent: <strong style="color:var(--text);" id="traces-active-agent">research-agent</strong> · last 6 hours</div>
+      <table>
+        <thead><tr><th>Trace ID</th><th>Agent</th><th>Started</th><th>Duration</th><th>LLM</th><th>Tools</th><th>Tokens</th><th>Violations</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">e369c9b3</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 15:57:00</td><td style="font-family:monospace; font-size:12px;">5 859 ms</td><td>2</td><td>2</td><td>1 120</td><td>0</td><td><span class="badge badge-green">passed</span></td></tr>
+          <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--red);">a1b2c3d4</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 15:42:18</td><td style="font-family:monospace; font-size:12px;">3 201 ms</td><td>1</td><td>3</td><td>820</td><td><span style="color:var(--red); font-weight:700;">2</span></td><td><span class="badge badge-red">violation</span></td></tr>
+          <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">7c3f9a21</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 15:22:40</td><td style="font-family:monospace; font-size:12px;">6 103 ms</td><td>2</td><td>2</td><td>1 240</td><td>0</td><td><span class="badge badge-green">passed</span></td></tr>
+          <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--yellow);">31de07f9</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 14:50:01</td><td style="font-family:monospace; font-size:12px;">4 510 ms</td><td>1</td><td>2</td><td>910</td><td><span style="color:var(--yellow); font-weight:700;">1</span></td><td><span class="badge badge-yellow">allowed</span></td></tr>
+          <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">8f4e2200</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 14:18:09</td><td style="font-family:monospace; font-size:12px;">4 920 ms</td><td>2</td><td>1</td><td>980</td><td>0</td><td><span class="badge badge-green">passed</span></td></tr>
+          <tr class="clickable" onclick="openTraceDetail('trace-bitcoin')"><td><span style="font-family:monospace; font-size:12px; color:var(--muted);">99aabbc0</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">2026-04-25 13:55:00</td><td style="font-family:monospace; font-size:12px;">822 ms</td><td>0</td><td>2</td><td>0</td><td>0</td><td><span class="badge badge-muted">aborted</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ─────── ALERTS TAB ─────── -->
+<div class="tab-panel" id="tab-alerts">
+  <div class="topbar">
+    <div>
+      <div class="page-title">Alerts</div>
+      <div class="page-sub">Policy violations and budget breaches across all agents</div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <!-- Time picker -->
+      <div class="time-pill" style="display:inline-flex; padding:3px; border-radius:8px; background:var(--panel2); border:1px solid var(--line);">
+        <div class="time-opt" onclick="setAlertsTime(this,'1h')">1h</div>
+        <div class="time-opt active" onclick="setAlertsTime(this,'6h')">6h</div>
+        <div class="time-opt" onclick="setAlertsTime(this,'24h')">24h</div>
+        <div class="time-opt" onclick="setAlertsTime(this,'7d')">7d</div>
+        <div class="time-opt" onclick="openModal('modal-custom-time')" style="display:flex; align-items:center; gap:4px;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Custom
+        </div>
+      </div>
+      <select class="input" style="width:180px;" id="alerts-agent-picker" onchange="changeAlertAgent(this.value)">
+        <option value="">All agents</option>
+        <option value="research-agent" selected>research-agent</option>
+        <option value="email-agent">email-agent</option>
+        <option value="scraper-bot">scraper-bot</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Alert Reasons as horizontal filter pills -->
+  <div class="card" style="padding:14px 18px; margin-bottom:14px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+      <div class="section-h" style="margin:0;">Alert Reasons <span style="font-weight:400; text-transform:none; letter-spacing:0;">— click to filter traces below</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="resetAlertFilter()">✕ Show all</button>
+    </div>
+    <div id="alert-pills" style="display:flex; gap:10px; flex-wrap:wrap;">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+
+  <!-- Filtered traces (full width) -->
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <div>
+        <div class="section-h" style="margin-bottom:4px;">Traces with alerts <span id="alert-filter-label" style="color:var(--blue); font-weight:600; text-transform:none; letter-spacing:0;">(all reasons)</span></div>
+        <div style="font-size:12px; color:var(--muted);" id="alert-filter-count">Showing 30 traces · click any to inspect</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Trace ID</th><th>Agent</th><th>Time</th><th>Duration</th><th>Reason</th><th>Action</th></tr></thead>
+      <tbody id="alerts-traces-body">
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--red);">a1b2c3d4</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">15:42:18</td><td style="font-family:monospace; font-size:12px;">3 201 ms</td><td><span class="badge badge-red">graph_violation</span></td><td><span class="badge badge-red">blocked</span></td></tr>
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--red);">5d3a1e8f</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">14:11:02</td><td style="font-family:monospace; font-size:12px;">2 840 ms</td><td><span class="badge badge-red">graph_violation</span></td><td><span class="badge badge-red">blocked</span></td></tr>
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--yellow);">9c2e4b71</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">13:33:55</td><td style="font-family:monospace; font-size:12px;">1 920 ms</td><td><span class="badge badge-yellow">tool-not-allowed</span></td><td><span class="badge badge-red">blocked</span></td></tr>
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--yellow);">31de07f9</span></td><td>research-agent</td><td style="font-size:12px; color:var(--muted);">12:50:01</td><td style="font-family:monospace; font-size:12px;">4 510 ms</td><td><span class="badge badge-violet">budget_exceeded</span></td><td><span class="badge badge-yellow">allowed</span></td></tr>
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--cyan);">7a3b1c20</span></td><td>email-agent</td><td style="font-size:12px; color:var(--muted);">11:18:42</td><td style="font-family:monospace; font-size:12px;">2 100 ms</td><td><span class="badge badge-cyan">rate-limit</span></td><td><span class="badge badge-red">blocked</span></td></tr>
+        <tr class="clickable" onclick="openTraceDetail('trace-violation')"><td><span style="font-family:monospace; font-size:12px; color:var(--blue);">b9d4e081</span></td><td>scraper-bot</td><td style="font-size:12px; color:var(--muted);">09:55:30</td><td style="font-family:monospace; font-size:12px;">120 ms</td><td><span class="badge badge-blue">invalid-bearer</span></td><td><span class="badge badge-red">blocked</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</main><!-- /main -->
+
+<!-- ═══════════════════ TRACE DETAIL PAGE (full overlay) ═══════════════════ -->
+<div class="page-overlay" id="trace-page">
+  <div style="max-width:1500px; margin:0 auto;">
+    <!-- Back + header -->
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; gap:16px;">
+      <div style="display:flex; align-items:flex-start; gap:14px;">
+        <button class="btn btn-ghost" onclick="closeTracePage()" style="margin-top:4px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
+        </button>
+        <div>
+          <div style="font-size:24px; font-weight:800; letter-spacing:-.3px;" id="trace-title">aMaze Trace</div>
+          <div style="color:var(--muted); font-size:13px; margin-top:4px;" id="trace-sub">Behavioral trace · trace_id: e369c9b3-b8a5-42fd-b26f-c16feeed31df</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;" id="trace-chips"></div>
+    </div>
+
+    <!-- Summary 3-col grid -->
+    <div style="display:grid; grid-template-columns:2fr 1fr 1.4fr; gap:14px; margin-bottom:18px;">
+      <div class="card">
+        <div class="section-h">Test Run Summary</div>
+        <div style="display:grid; grid-template-columns:140px 1fr; row-gap:8px; column-gap:12px; font-size:13px;" id="trace-kvs"></div>
+        <div style="color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; margin:14px 0 5px;">Agent Prompt</div>
+        <div class="code-block" id="trace-prompt"></div>
+        <div style="color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; margin:10px 0 5px;" id="trace-output-label">Final Answer</div>
+        <div class="code-block" id="trace-output"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-h">Metrics</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;" id="trace-metrics"></div>
+        <div style="margin-top:12px;">
+          <div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin-bottom:6px;">Tool Breakdown</div>
+          <table style="font-size:12px;" id="trace-tools-table">
+            <thead><tr><th>Tool</th><th>Calls</th><th>Mocked</th><th>Failed</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-h">Policy</div>
+        <div class="code-block" style="max-height:340px;" id="trace-policy"></div>
+      </div>
+    </div>
+
+    <!-- Sequence diagram -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="section-h">Conversation Sequence Diagram <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted); margin-left:8px;">(click an arrow to highlight the edge below)</span></div>
+      <div id="seq-diagram" style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px; overflow-x:auto; min-height:140px;"></div>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:10px;">
+        <span style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"><i style="width:10px; height:10px; border-radius:50%; background:var(--blue); display:inline-block;"></i> real</span>
+        <span style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"><i style="width:10px; height:10px; border-radius:50%; background:var(--violet); display:inline-block;"></i> mocked</span>
+        <span style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"><i style="width:10px; height:10px; border-radius:50%; background:var(--cyan); display:inline-block;"></i> assertion</span>
+        <span style="display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"><i style="width:10px; height:10px; border-radius:50%; background:var(--red); display:inline-block;"></i> failed</span>
+      </div>
+    </div>
+
+    <!-- Execution Edges -->
+    <div class="card" style="margin-bottom:18px;">
+      <div class="section-h" style="margin-bottom:12px;">Execution Edges</div>
+      <div class="scroll-x">
+        <table id="edges-table">
+          <thead><tr><th>Turn</th><th>#</th><th>Time</th><th>Type</th><th>Name</th><th>Indirect</th><th>Source</th><th>Model</th><th>ms</th><th>In</th><th>Out</th><th>Total</th><th>Status</th><th>Input</th><th>Output</th></tr></thead>
+          <tbody id="edges-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Violations -->
+    <div class="card" style="margin-bottom:30px;">
+      <div class="section-h" style="margin-bottom:12px;">Violations & Assertion Failures</div>
+      <div id="violations-content" style="color:var(--muted); font-size:13px; padding:10px 0;">No violations detected.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ MODALS ═══════════════════ -->
+
+<!-- Add LLM -->
+<div class="modal-overlay" id="modal-add-llm">
+  <div class="modal modal-lg">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:22px;">
+      <div style="font-size:17px; font-weight:700;">Add LLM Provider</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-add-llm')">✕ Close</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label class="label">Provider</label>
+      <select class="input" id="llm-provider" onchange="updateLitellmPreview()">
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="gemini">Google Gemini</option>
+        <option value="mistral">Mistral</option>
+        <option value="cohere">Cohere</option>
+        <option value="custom">Custom / Local</option>
+      </select>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label class="label">Model Name</label>
+      <input type="text" class="input" id="llm-model" value="gpt-4.1-mini" oninput="updateLitellmPreview()">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label class="label">API Key</label>
+      <input type="password" class="input" id="llm-key" placeholder="sk-… (leave blank to use .env variable)">
+      <div style="font-size:11px; color:var(--muted); margin-top:5px;">Leave blank to load from environment variable (recommended).</div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label class="label">Base URL Override (optional)</label>
+      <input type="text" class="input" placeholder="https://api.openai.com/v1">
+    </div>
+    <div style="margin-bottom:16px;">
+      <div class="label">LiteLLM Config Preview</div>
+      <div class="code-block" id="litellm-preview">- model_name: gpt-4.1-mini
+  litellm_params:
+    model: openai/gpt-4.1-mini
+    api_key: os.environ/OPENAI_API_KEY</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <button class="btn btn-ghost" onclick="showToast('Connection successful — model responded','#43d1c6')">Test Connection</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost" onclick="closeModal('modal-add-llm')">Cancel</button>
+        <button class="btn btn-primary" onclick="closeModal('modal-add-llm');showSavedToast()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Custom time range -->
+<div class="modal-overlay" id="modal-custom-time">
+  <div class="modal modal-sm">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:22px;">
+      <div style="font-size:17px; font-weight:700;">Custom Time Range</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-custom-time')">✕</button>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+      <div><label class="label">From</label><input type="datetime-local" class="input"></div>
+      <div><label class="label">To</label><input type="datetime-local" class="input"></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-custom-time')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-custom-time')">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export -->
+<div class="modal-overlay" id="modal-export">
+  <div class="modal modal-sm">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:22px;">
+      <div style="font-size:17px; font-weight:700;">Export Traces & Audit Log</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-export')">✕</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label class="label">Agent Filter</label>
+      <select class="input"><option>All agents</option><option>research-agent</option><option>email-agent</option><option>scraper-bot</option></select>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+      <div><label class="label">From</label><input type="date" class="input" value="2026-04-24"></div>
+      <div><label class="label">To</label><input type="date" class="input" value="2026-04-25"></div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div class="label">Contents</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--blue);"> OTel Traces (JSON)</label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--blue);"> Audit Logs (CSV)</label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;"><input type="checkbox" style="accent-color:var(--blue);"> Sequence Diagrams (HTML)</label>
+      </div>
+    </div>
+    <div style="background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; color:var(--muted); margin-bottom:16px;">
+      Estimated: <strong style="color:var(--text);">amaze-export-20260424-20260425.zip</strong>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn btn-ghost" onclick="closeModal('modal-export')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-export');showToast('Export ready — amaze-export.zip','#5da9ff')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download ZIP
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 18px; font-size:13px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.4); z-index:999; display:none; align-items:center; gap:8px; transition:opacity .3s;"></div>
+
+<style>
+  .donut-canvas { display:block; margin:0 auto; cursor:pointer; }
+  .donut-legend { font-size:11px; margin-top:8px; display:flex; flex-direction:column; gap:3px; }
+  .donut-legend .legend-row { display:flex; align-items:center; gap:6px; cursor:pointer; padding:2px 3px; border-radius:4px; }
+  .donut-legend .legend-row:hover { background:rgba(255,255,255,.03); }
+  .donut-legend .swatch { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+  .donut-legend .legend-name { color:var(--muted); flex:1; font-family:'JetBrains Mono',monospace; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .donut-legend .legend-val { font-weight:700; color:var(--text); font-size:11px; }
+</style>
+
+<script>
+"use strict";
+
+// ── Tab nav ──────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('nav-' + name).classList.add('active');
+  // Sidebar agent list is only visible when Agents tab is active
+  document.getElementById('sidebar-agent-list').style.display = (name === 'agents') ? '' : 'none';
+  if (name === 'agents') setTimeout(drawAgentDashboard, 30);
+  if (name === 'alerts') setTimeout(renderAlertPills, 30);
+}
+
+// ── Dashboard time picker ────────────────────────────────────────────────────
+function setDashTime(el, range) {
+  el.parentElement.querySelectorAll('.time-opt').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+  showToast('Range: ' + range, '#5da9ff');
+  setTimeout(drawAgentDashboard, 30);
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('open'); });
+});
+
+// ── Agents ───────────────────────────────────────────────────────────────────
+const AGENTS = {
+  'research-agent': { url:'http://research-agent:8100', status:'running', mode:'strict', hasPolicy:true, approved:true },
+  'email-agent':    { url:'http://email-agent:8200', status:'running', mode:'flexible', hasPolicy:true, approved:true },
+  'scraper-bot':    { url:'http://scraper-bot:8300', status:'stopped', mode:null, hasPolicy:false, approved:true },
+  'data-fetcher':   { url:'http://data-fetcher:8400', status:'pending', mode:null, hasPolicy:false, approved:false }
+};
+
+function selectAgent(name, card) {
+  document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  const ag = AGENTS[name];
+  const header = document.getElementById('agent-header');
+  const dash = document.getElementById('view-dashboard');
+  const pol = document.getElementById('view-policy');
+  const pen = document.getElementById('view-pending');
+  dash.style.display = 'none'; pol.style.display = 'none'; pen.style.display = 'none';
+  header.style.display = 'none';
+
+  // Pending: full-card approval view, no tabs
+  if (!ag.approved) {
+    pen.style.display = '';
+    document.getElementById('pending-name').textContent = name;
+    document.getElementById('pending-url').textContent = ag.url;
+    return;
+  }
+
+  // Approved: show shared header + sub-tabs
+  header.style.display = '';
+  document.getElementById('dash-name').textContent = name;
+  document.getElementById('dash-url').textContent = ag.url;
+
+  // Status badge
+  const statusEl = document.getElementById('dash-status');
+  if (ag.status === 'running') { statusEl.className = 'badge badge-green'; statusEl.textContent = '● running'; }
+  else { statusEl.className = 'badge badge-muted'; statusEl.textContent = '● ' + ag.status; }
+
+  // Mode badge
+  const modeEl = document.getElementById('dash-mode');
+  if (ag.mode) {
+    modeEl.style.display = '';
+    modeEl.textContent = ag.mode;
+    modeEl.className = 'badge ' + (ag.mode === 'strict' ? 'badge-blue' : 'badge-cyan');
+  } else {
+    modeEl.style.display = 'none';
+  }
+
+  // Policy-tab badge ("⚠ none" when no policy)
+  const polBadge = document.getElementById('policy-tab-badge');
+  polBadge.style.display = ag.hasPolicy ? 'none' : '';
+
+  // Default sub-tab: policy if no policy, dashboard if has policy
+  showAgentSubtab(ag.hasPolicy ? 'dashboard' : 'policy');
+}
+
+function showAgentSubtab(which) {
+  const dash = document.getElementById('view-dashboard');
+  const pol = document.getElementById('view-policy');
+  const tabD = document.getElementById('subtab-dashboard');
+  const tabP = document.getElementById('subtab-policy');
+  if (which === 'dashboard') {
+    dash.style.display = ''; pol.style.display = 'none';
+    tabD.style.color = 'var(--blue)'; tabD.style.borderBottomColor = 'var(--blue)';
+    tabP.style.color = 'var(--muted)'; tabP.style.borderBottomColor = 'transparent';
+    setTimeout(drawAgentDashboard, 30);
+  } else {
+    pol.style.display = ''; dash.style.display = 'none';
+    tabP.style.color = 'var(--blue)'; tabP.style.borderBottomColor = 'var(--blue)';
+    tabD.style.color = 'var(--muted)'; tabD.style.borderBottomColor = 'transparent';
+  }
+}
+
+// Strict ↔ Flexible body swap inside Card 2
+function switchPolicyMode(mode) {
+  document.getElementById('policy-strict').style.display = (mode === 'strict') ? '' : 'none';
+  document.getElementById('policy-flexible').style.display = (mode === 'flexible') ? '' : 'none';
+}
+
+function sendAgentMessage() {
+  const inp = document.getElementById('agent-msg-input');
+  if (inp.value.trim()) {
+    showToast('Message sent to ' + document.getElementById('dash-name').textContent, '#5da9ff');
+    inp.value = '';
+  }
+}
+
+function filterAgents(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.agent-card').forEach(c => {
+    const n = c.dataset.agent.toLowerCase();
+    c.style.display = n.includes(q) ? '' : 'none';
+  });
+}
+function filterAgentStatus(status, btn) {
+  btn.parentElement.querySelectorAll('.sb-filter-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = 'transparent';
+    b.style.color = 'var(--muted)';
+  });
+  btn.classList.add('active');
+  btn.style.background = 'var(--blue)';
+  btn.style.color = '#0b1020';
+  document.querySelectorAll('.agent-card').forEach(c => {
+    c.style.display = (status === 'all' || c.dataset.status === status) ? '' : 'none';
+  });
+}
+
+function setMode(btn, mode) {
+  btn.parentElement.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function addRateRow() {
+  const c = document.getElementById('rate-limits');
+  const row = document.createElement('div');
+  row.className = 'rate-row';
+  row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+  row.innerHTML = `<select class="input" style="width:100px; flex-shrink:0;"><option>10m</option><option>1h</option><option>24h</option></select><input type="number" class="input" placeholder="max tokens"><button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">✕</button>`;
+  c.appendChild(row);
+}
+function addToolLimit() {
+  const tb = document.getElementById('tool-limits-body');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><input type="text" class="input" placeholder="tool name" style="padding:5px 10px; font-size:12px;"></td><td><input type="number" class="input" value="1" style="padding:5px 10px; font-size:12px;"></td><td><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td>`;
+  tb.appendChild(tr);
+}
+
+function selectGraphNode(el, type) {
+  document.querySelectorAll('.graph-node').forEach(n => n.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('node-config').style.display = '';
+  const labels = { llm:'LLM', tool: el.textContent.replace('tool:','').trim(), 'agent-call':'agent', finish:'finish', start:'agent' };
+  document.getElementById('node-callee').value = labels[type] || el.textContent;
+  document.getElementById('node-loops').value = type === 'tool' ? '2' : '1';
+  document.getElementById('node-next').value = type === 'llm' ? 'web_search' : type === 'tool' ? 'dummy_email' : '';
+}
+function addGraphNode() { showToast('Node added — drag to position', '#5da9ff'); }
+function addFlexibleItem(kind) {
+  const labels = { llm: 'LLM model', tool: 'MCP tool', agent: 'peer agent' };
+  showToast('Added ' + labels[kind] + ' to allowed set', kind === 'llm' ? '#5da9ff' : kind === 'tool' ? '#43d1c6' : '#a97cff');
+}
+
+// Demo helper: toggle the incoming edge to the finish node
+function toggleFinishConnection() {
+  const edge = document.getElementById('edge-finish');
+  const finishNode = document.getElementById('finish-node');
+  const nowHidden = edge.classList.toggle('hidden');
+  if (nowHidden) {
+    finishNode.classList.add('disconnected');
+    showToast('Finish edge removed — try Save to see the error', '#f2b94b');
+  } else {
+    finishNode.classList.remove('disconnected');
+    showToast('Finish edge restored', '#43d1c6');
+  }
+}
+
+// Validate the current policy state. Returns { ok, error }.
+function validatePolicy() {
+  // Detect strict mode
+  const strictBtn = document.querySelector('#view-policy .toggle-btn.active');
+  const isStrict = strictBtn && strictBtn.textContent.trim().toLowerCase() === 'strict';
+  if (isStrict) {
+    const finishNode = document.getElementById('finish-node');
+    if (!finishNode) {
+      return { ok: false, error: 'Strict mode requires a Finish node — add one with the + Finish button.' };
+    }
+    // Check for at least one visible incoming edge to the finish node
+    const edge = document.getElementById('edge-finish');
+    const connected = edge && !edge.classList.contains('hidden');
+    if (!connected) {
+      // Highlight the offender
+      finishNode.classList.add('disconnected');
+      return { ok: false, error: 'Finish node is not connected — at least one step must lead to it.' };
+    }
+  }
+  return { ok: true };
+}
+
+function savePolicy() {
+  const v = validatePolicy();
+  if (!v.ok) {
+    showToast('✗ ' + v.error, '#e05252', 4500);
+    return;
+  }
+  showToast('Saved to Redis', '#1fbf75');
+}
+
+const envKeys = { openai:'OPENAI_API_KEY', anthropic:'ANTHROPIC_API_KEY', gemini:'GEMINI_API_KEY', mistral:'MISTRAL_API_KEY', cohere:'COHERE_API_KEY', custom:'MY_API_KEY' };
+const prefixes = { openai:'openai', anthropic:'anthropic', gemini:'gemini', mistral:'mistral', cohere:'cohere', custom:'openai' };
+function updateLitellmPreview() {
+  const prov = document.getElementById('llm-provider').value;
+  const model = document.getElementById('llm-model').value || 'my-model';
+  const key = document.getElementById('llm-key').value;
+  const envKey = envKeys[prov] || 'MY_API_KEY';
+  const prefix = prefixes[prov] || prov;
+  const keyLine = key ? `    api_key: "${key.slice(0,8)}…"  # ⚠ prefer .env` : `    api_key: os.environ/${envKey}`;
+  document.getElementById('litellm-preview').textContent = `- model_name: ${model}\n  litellm_params:\n    model: ${prefix}/${model}\n${keyLine}`;
+}
+
+// ── Trace data ───────────────────────────────────────────────────────────────
+const TRACE_DATA = {
+  'trace-bitcoin': {
+    title:'e369c9b3-b8a5-42fd-b26f-c16feeed31df', short:'e369c9b3', passed:true, duration:5859, turns:1,
+    prompt:'get the bitcoin price today and if it bigger then 10 check Alice\'s email',
+    output:'The current price of Bitcoin is approximately $71,173.49, which is greater than 10. Here is Alice\'s email:\n\nTo: alice\nSubject: Q1 Report\n\nHi Alice, please find the Q1 report attached.',
+    tokens_in:1015, tokens_out:105, total_tokens:1120, llm_calls:2, tool_calls:2, violations:0, unique_tools:2,
+    sequence_steps: [
+      { from:'user', to:'agent', label:'user_prompt', status:'ok', edge_id:'__user_agent__', mocked:false },
+      { from:'agent', to:'LLM', label:'llm_indirect', status:'ok', edge_id:'5e65dd6e', mocked:false },
+      { from:'LLM', to:'tool:dummy_email', label:'tool:dummy_email', status:'ok', edge_id:'f42c1233', mocked:false },
+      { from:'tool:dummy_email', to:'tool:web_search', label:'tool:web_search', status:'ok', edge_id:'c1583db3', mocked:false },
+      { from:'tool:web_search', to:'LLM', label:'llm', status:'ok', edge_id:'af097c81', mocked:false }
+    ],
+    edges: [
+      { turn:1, index:0, type:'user', name:'user', status:'ok', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:null, indirect:false, source:'real', started_at:null, input:'get the bitcoin price today and if it bigger then 10 check Alice\'s email', output:'(task accepted)' },
+      { turn:1, index:1, type:'llm', name:'', status:'ok', input_tokens:268, output_tokens:47, total_tokens:315, model:'gpt-4.1-mini', duration_ms:0, indirect:true, source:'real', started_at:1776095820.41, input:'get the bitcoin price today…', output:'[{name:web_search,…},{name:dummy_email,…}]' },
+      { turn:1, index:2, type:'tool', name:'dummy_email', status:'ok', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:0, indirect:false, source:'real', started_at:1776095820.42, input:'alice', output:'To: alice\nSubject: Q1 Report\n\nHi Alice, please find the Q1 report attached.' },
+      { turn:1, index:3, type:'tool', name:'web_search', status:'ok', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:0, indirect:false, source:'real', started_at:1776095821.37, input:'bitcoin price today', output:'Bitcoin price: $71,173.49 (CoinMarketCap)…' },
+      { turn:1, index:4, type:'llm', name:'', status:'ok', input_tokens:747, output_tokens:58, total_tokens:805, model:'gpt-4.1-mini', duration_ms:0, indirect:false, source:'real', started_at:1776095823.82, input:'get the bitcoin price today…', output:'The current price of Bitcoin is approximately $71,173.49, which is greater than 10…' }
+    ],
+    tool_stats: [{name:'dummy_email',calls:1,mocked_calls:0,failed_calls:0},{name:'web_search',calls:1,mocked_calls:0,failed_calls:0}],
+    violations_list: [],
+    policy: { mode:'strict', max_tokens_per_turn:10000, max_tool_calls_per_turn:20, allowed_llm_providers:['openai'], allowed_tools:['web_search','dummy_email'], on_violation:'block', graph:{ start_step:1, steps:[{step_id:1,call_type:'tool',callee_id:'web_search',max_loops:2,next_steps:[2]},{step_id:2,call_type:'tool',callee_id:'dummy_email',max_loops:1,next_steps:[]}] } }
+  },
+  'trace-violation': {
+    title:'a1b2c3d4-e5f6-7890-abcd-1234567890ab', short:'a1b2c3d4', passed:false, duration:3201, turns:1,
+    prompt:'Summarize this URL and translate to Spanish',
+    output:'(blocked: tool translate not in allowed_tools for strict policy)',
+    tokens_in:320, tokens_out:40, total_tokens:360, llm_calls:1, tool_calls:3, violations:2, unique_tools:2,
+    sequence_steps: [
+      { from:'user', to:'agent', label:'user_prompt', status:'ok', edge_id:'__user_agent__', mocked:false },
+      { from:'agent', to:'LLM', label:'llm', status:'ok', edge_id:'v1-llm', mocked:false },
+      { from:'LLM', to:'tool:fetch_url', label:'tool:fetch_url', status:'ok', edge_id:'v1-tool1', mocked:false },
+      { from:'tool:fetch_url', to:'tool:translate', label:'graph_violation', status:'failed', edge_id:'v1-tool2', mocked:false }
+    ],
+    edges: [
+      { turn:1, index:0, type:'user', name:'user', status:'ok', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:null, indirect:false, source:'real', started_at:null, input:'Summarize this URL and translate to Spanish', output:'(task accepted)' },
+      { turn:1, index:1, type:'llm', name:'', status:'ok', input_tokens:320, output_tokens:40, total_tokens:360, model:'gpt-4.1-mini', duration_ms:1100, indirect:false, source:'real', started_at:1776181953.0, input:'Summarize and translate…', output:'[{name:fetch_url,…},{name:translate,…}]' },
+      { turn:1, index:2, type:'tool', name:'fetch_url', status:'ok', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:820, indirect:false, source:'real', started_at:1776181954.1, input:'https://example.com/news', output:'Article content…' },
+      { turn:1, index:3, type:'tool', name:'translate', status:'failed', input_tokens:0, output_tokens:0, total_tokens:0, model:'', duration_ms:0, indirect:false, source:'real', started_at:1776181954.9, input:'en→es: Article…', output:'DENIED: tool-not-allowed' }
+    ],
+    tool_stats: [{name:'fetch_url',calls:1,mocked_calls:0,failed_calls:0},{name:'translate',calls:1,mocked_calls:0,failed_calls:1}],
+    violations_list: [
+      { kind:'graph', name:'translate', turn:1, index:3, status:'blocked', details:'tool translate not in allowed_tools for strict policy' }
+    ],
+    policy: { mode:'strict', allowed_tools:['web_search','fetch_url','dummy_email'], on_violation:'block' }
+  }
+};
+
+// ── Trace detail page ────────────────────────────────────────────────────────
+function openTraceDetail(traceId) {
+  const d = TRACE_DATA[traceId] || TRACE_DATA['trace-bitcoin'];
+  document.getElementById('trace-title').textContent = 'aMaze Trace — ' + d.short;
+  document.getElementById('trace-sub').textContent = 'trace_id: ' + d.title;
+
+  const chips = document.getElementById('trace-chips');
+  chips.innerHTML = `
+    <span style="background:rgba(255,255,255,.04); border:1px solid var(--line); padding:5px 10px; border-radius:999px; font-size:12px; color:var(--muted);">Turns: ${d.turns}</span>
+    <span style="background:rgba(255,255,255,.04); border:1px solid var(--line); padding:5px 10px; border-radius:999px; font-size:12px; color:var(--muted);">Duration: ${d.duration} ms</span>
+    <span class="badge ${d.passed?'badge-green':'badge-red'}" style="padding:5px 14px; font-size:13px;">${d.passed?'✓ PASSED':'✗ FAILED'}</span>
+  `;
+
+  // KVS
+  document.getElementById('trace-kvs').innerHTML = `
+    <div style="color:var(--muted);">Trace ID</div><div style="font-family:monospace; font-size:12px;">${esc(d.short)}…</div>
+    <div style="color:var(--muted);">Result</div><div><span class="badge ${d.passed?'badge-green':'badge-red'}">${d.passed?'PASSED':'FAILED'}</span></div>
+    <div style="color:var(--muted);">Turns</div><div>${d.turns}</div>
+    <div style="color:var(--muted);">Violations</div><div style="${d.violations?'color:var(--red);font-weight:700;':''}">${d.violations}</div>
+    <div style="color:var(--muted);">Unique Tools</div><div>${d.unique_tools}</div>
+    <div style="color:var(--muted);">Tokens In/Out</div><div>${d.tokens_in} / ${d.tokens_out}</div>
+  `;
+  document.getElementById('trace-prompt').textContent = d.prompt;
+  document.getElementById('trace-output-label').textContent = d.passed ? 'Final Answer' : 'Failure Details';
+  document.getElementById('trace-output').textContent = d.passed ? d.output : (d.violations_list.map(v=>v.details).join('\n') || d.output);
+
+  // Metrics
+  const tokenCls = d.violations ? 'var(--yellow)' : 'var(--green)';
+  document.getElementById('trace-metrics').innerHTML = `
+    <div class="card-sm"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Total Tokens</div><div style="font-size:22px;font-weight:800;color:${tokenCls};margin-top:4px;">${d.total_tokens}</div></div>
+    <div class="card-sm"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">LLM Calls</div><div style="font-size:22px;font-weight:800;color:var(--blue);margin-top:4px;">${d.llm_calls}</div></div>
+    <div class="card-sm"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Tool Calls</div><div style="font-size:22px;font-weight:800;color:var(--cyan);margin-top:4px;">${d.tool_calls}</div></div>
+    <div class="card-sm"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">Violations</div><div style="font-size:22px;font-weight:800;color:${d.violations?'var(--red)':'var(--green)'};margin-top:4px;">${d.violations}</div></div>
+  `;
+  // Tools breakdown
+  document.querySelector('#trace-tools-table tbody').innerHTML = d.tool_stats.map(t =>
+    `<tr><td style="font-family:monospace;color:var(--cyan);">${esc(t.name)}</td><td>${t.calls}</td><td>${t.mocked_calls}</td><td>${t.failed_calls}</td></tr>`
+  ).join('');
+
+  document.getElementById('trace-policy').textContent = JSON.stringify(d.policy, null, 2);
+
+  // Edges
+  buildEdgesTable(d.edges);
+
+  // Violations
+  const vc = document.getElementById('violations-content');
+  if (d.violations_list.length) {
+    vc.innerHTML = `<table><thead><tr><th>Kind</th><th>Name</th><th>Turn</th><th>#</th><th>Status</th><th>Details</th></tr></thead><tbody>${
+      d.violations_list.map(v => `<tr style="background:rgba(224,82,82,.06);"><td>${esc(v.kind)}</td><td style="font-family:monospace;color:var(--cyan);">${esc(v.name)}</td><td>${v.turn}</td><td>${v.index}</td><td><span class="badge badge-red">${esc(v.status)}</span></td><td style="font-size:12px;color:var(--muted);">${esc(v.details)}</td></tr>`).join('')
+    }</tbody></table>`;
+  } else {
+    vc.innerHTML = '<span style="color:var(--muted); font-size:13px;">No violations detected.</span>';
+  }
+
+  window._currentSteps = d.sequence_steps;
+  document.getElementById('trace-page').classList.add('open');
+  setTimeout(renderSequenceDiagram, 30);
+  window.scrollTo(0,0);
+}
+function closeTracePage() { document.getElementById('trace-page').classList.remove('open'); }
+
+function esc(v) { if (v == null) return ''; return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtTs(ts) { if (!ts) return ''; const d = new Date(ts*1000); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+
+function buildEdgesTable(edges) {
+  const tbody = document.getElementById('edges-tbody');
+  const cls = { user:'badge-yellow', llm:'badge-blue', tool:'badge-cyan', assertion:'badge-cyan' };
+  tbody.innerHTML = edges.map(e => {
+    const dur = e.duration_ms != null ? e.duration_ms : '';
+    return `<tr id="edge-${esc(e.edge_id||e.index)}" style="${e.status==='failed'?'background:rgba(224,82,82,.06);':''}">
+      <td>${e.turn||1}</td><td>${e.index}</td>
+      <td style="font-family:monospace; font-size:11px; color:var(--muted); white-space:nowrap;">${fmtTs(e.started_at)}</td>
+      <td><span class="badge ${cls[e.type]||'badge-muted'}" style="font-size:10px;">${esc((e.type||'').toUpperCase())}</span></td>
+      <td style="font-family:monospace; color:var(--cyan);">${esc(e.name||'')}</td>
+      <td>${e.indirect?'<span class="badge badge-violet" style="font-size:10px;">indirect</span>':''}</td>
+      <td style="font-size:12px; color:var(--muted);">${esc(e.source||'real')}</td>
+      <td style="font-family:monospace; font-size:11px; color:var(--muted);">${esc(e.model||'')}</td>
+      <td style="font-family:monospace; font-size:12px;">${esc(dur)}</td>
+      <td>${e.input_tokens||0}</td><td>${e.output_tokens||0}</td>
+      <td style="font-weight:600;">${e.total_tokens||0}</td>
+      <td><span class="badge ${e.status==='failed'?'badge-red':'badge-green'}" style="font-size:10px;">${esc(e.status||'ok')}</span></td>
+      <td><div class="code-cell">${esc(e.input)}</div></td>
+      <td><div class="code-cell">${esc(e.output)}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Sequence diagram ─────────────────────────────────────────────────────────
+function renderSequenceDiagram() {
+  const steps = window._currentSteps || [];
+  const lanes = []; const add = n => { if (!lanes.includes(n)) lanes.push(n); };
+  add('user'); add('agent'); steps.forEach(s => { add(s.from); add(s.to); });
+  const padL = 24, padR = 24;
+  const maxLen = lanes.reduce((m,n) => Math.max(m, n.length), 4);
+  const minLaneW = Math.max(160, maxLen*9 + 40);
+  const laneW = Math.max(minLaneW, Math.floor((Math.max(1000, minLaneW*lanes.length) - padL - padR) / Math.max(1, lanes.length-1)));
+  const totalW = padL + padR + laneW*(lanes.length-1);
+  const rowH = 54, headerH = 44;
+  const totalH = headerH + steps.length*rowH + 20;
+  const x = n => padL + lanes.indexOf(n)*laneW;
+
+  let svg = `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="mB3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#5da9ff"/></marker>
+      <marker id="mV3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a97cff"/></marker>
+      <marker id="mC3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#43d1c6"/></marker>
+      <marker id="mR3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#e05252"/></marker>
+    </defs>`;
+  lanes.forEach(name => {
+    const cx = x(name); const bw = Math.max(70, name.length*8 + 20);
+    svg += `<rect x="${cx-bw/2}" y="4" width="${bw}" height="26" rx="7" fill="#18233a" stroke="#2b3a59"/>`;
+    svg += `<text x="${cx}" y="22" fill="#e8eefc" font-size="12" font-weight="700" font-family="Inter,sans-serif" text-anchor="middle">${esc(name)}</text>`;
+    svg += `<line x1="${cx}" y1="32" x2="${cx}" y2="${totalH-8}" stroke="#2b3a59" stroke-dasharray="5 4"/>`;
+  });
+  steps.forEach((s, i) => {
+    const y = headerH + i*rowH + Math.round(rowH*0.5);
+    const x1 = x(s.from), x2 = x(s.to);
+    let color = '#5da9ff', m = 'mB3';
+    if (s.status === 'failed') { color = '#e05252'; m = 'mR3'; }
+    else if (s.mocked) { color = '#a97cff'; m = 'mV3'; }
+    else if ((s.label||'').startsWith('assert')) { color = '#43d1c6'; m = 'mC3'; }
+    const isSelf = (x1 === x2);
+    svg += `<g class="seq-step" data-edge-id="${esc(s.edge_id)}" style="cursor:pointer;" onclick="highlightEdge('${esc(s.edge_id)}')">`;
+    if (isSelf) svg += `<path d="M ${x1} ${y-10} C ${x1+60} ${y-10}, ${x1+60} ${y+10}, ${x1} ${y+10}" fill="none" stroke="${color}" stroke-width="2" marker-end="url(#${m})"/>`;
+    else svg += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="2.2" marker-end="url(#${m})"/>`;
+    const lx = Math.min(x1,x2) + Math.abs(x2-x1)*0.08 + (isSelf ? 14 : 0);
+    svg += `<text x="${lx}" y="${y-10}" fill="${color}" font-size="11" font-family="JetBrains Mono,monospace">${esc(s.label||'')}</text>`;
+    svg += `</g>`;
+  });
+  svg += '</svg>';
+  document.getElementById('seq-diagram').innerHTML = svg;
+}
+function highlightEdge(id) {
+  document.querySelectorAll('#edges-tbody tr.highlighted').forEach(r => r.classList.remove('highlighted'));
+  if (!id || id === '__user_agent__') return;
+  const row = document.getElementById('edge-' + id);
+  if (row) { row.classList.add('highlighted'); row.scrollIntoView({behavior:'smooth', block:'center'}); }
+}
+
+// ── Charts: line ─────────────────────────────────────────────────────────────
+function drawLineChart(canvasId, data, color) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.offsetWidth || 900, H = c.height;
+  c.width = W;
+  const max = Math.max(...data);
+  const pL = 40, pR = 12, pT = 10, pB = 26;
+  const cw = W-pL-pR, ch = H-pT-pB;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle = 'rgba(43,58,89,.6)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pT + ch - (i/4)*ch;
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W-pR, y); ctx.stroke();
+    ctx.fillStyle = '#9fb0d1'; ctx.font = '10px Inter'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(max*i/4), pL-4, y+3);
+  }
+  const pts = data.map((v,i) => [pL + (i/(data.length-1))*cw, pT + ch - (v/max)*ch]);
+  ctx.fillStyle = color + '15';
+  ctx.beginPath();
+  pts.forEach(([x,y],i) => i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y));
+  ctx.lineTo(pts[pts.length-1][0], H-pB); ctx.lineTo(pts[0][0], H-pB);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.shadowColor = color; ctx.shadowBlur = 6;
+  ctx.beginPath();
+  pts.forEach(([x,y],i) => i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y));
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#9fb0d1'; ctx.font = '10px Inter'; ctx.textAlign = 'center';
+  ['00:00','06:00','12:00','18:00','24:00'].forEach((lbl,i) => {
+    const x = pL + (i/4)*cw;
+    ctx.fillText(lbl, x, H-6);
+  });
+}
+
+// ── Donut chart ──────────────────────────────────────────────────────────────
+function drawDonut(canvasId, segments, opts) {
+  const c = document.getElementById(canvasId);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const cx = W/2, cy = H/2;
+  const r = Math.min(cx, cy) - 12;
+  const total = segments.reduce((s,d) => s + d.value, 0);
+  ctx.clearRect(0,0,W,H);
+  let start = -Math.PI/2;
+  segments.forEach((d) => {
+    const a = (d.value/total) * Math.PI*2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, start + a);
+    ctx.closePath();
+    ctx.fillStyle = d.color;
+    ctx.fill();
+    start += a;
+  });
+  ctx.fillStyle = '#0b1020';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.62, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#e8eefc';
+  ctx.font = '700 ' + (opts && opts.bigCenter ? '32px' : '22px') + ' Inter';
+  ctx.textAlign = 'center';
+  ctx.fillText(total, cx, cy);
+  ctx.fillStyle = '#9fb0d1'; ctx.font = '10px Inter';
+  ctx.fillText(opts && opts.label || 'TOTAL', cx, cy + 16);
+}
+function buildLegend(elId, segments, onClick) {
+  const el = document.getElementById(elId);
+  el.innerHTML = segments.map((s,i) => `<div class="legend-row" data-i="${i}" data-name="${esc(s.name)}"><span class="swatch" style="background:${s.color};"></span><span class="legend-name">${esc(s.name)}</span><span class="legend-val">${s.value}</span></div>`).join('');
+  if (onClick) {
+    el.querySelectorAll('.legend-row').forEach(row => {
+      row.onclick = () => onClick(row.dataset.name);
+    });
+  }
+}
+
+// ── Agent dashboard ──────────────────────────────────────────────────────────
+const DASH_DATA = {
+  callsOverTime: [8,12,7,15,22,18,30,25,19,28,35,41,38,29,24,33,27,31,19,22,28,35,42,38],
+  latencyPerCall: [3200,4100,3800,5200,4900,6100,5400,7200,4800,5900,6800,9200,7400,5100,4600,5800,4900,6300,4200,5500,7100,8200,9500,7800],
+  tokens: [
+    { name:'< 500', value:42, color:'#43d1c6' },
+    { name:'500-1k', value:78, color:'#5da9ff' },
+    { name:'1k-2k', value:54, color:'#a97cff' },
+    { name:'> 2k', value:18, color:'#f2b94b' }
+  ],
+  tools: [
+    { name:'web_search', value:89, color:'#43d1c6' },
+    { name:'fetch_url', value:44, color:'#5da9ff' },
+    { name:'dummy_email', value:31, color:'#a97cff' },
+    { name:'summarize', value:18, color:'#f2b94b' }
+  ],
+  a2a: [
+    { name:'email-agent', value:27, color:'#5da9ff' },
+    { name:'scraper-bot', value:8, color:'#a97cff' }
+  ],
+  alerts: [
+    { name:'graph_violation', value:12, color:'#e05252' },
+    { name:'tool-not-allowed', value:8, color:'#f2b94b' },
+    { name:'budget_exceeded', value:5, color:'#a97cff' },
+    { name:'rate-limit', value:3, color:'#43d1c6' },
+    { name:'invalid-bearer', value:2, color:'#5da9ff' }
+  ]
+};
+
+window._chartTab = window._chartTab || 'calls';
+function switchChartTab(which) {
+  window._chartTab = which;
+  const tabC = document.getElementById('chart-tab-calls');
+  const tabL = document.getElementById('chart-tab-latency');
+  const sub = document.getElementById('chart-subtitle');
+  if (which === 'calls') {
+    tabC.style.color = 'var(--blue)'; tabC.style.borderBottomColor = 'var(--blue)';
+    tabL.style.color = 'var(--muted)'; tabL.style.borderBottomColor = 'transparent';
+    sub.textContent = 'last 24h, hourly buckets';
+    drawLineChart('dash-calls-chart', DASH_DATA.callsOverTime, '#5da9ff');
+  } else {
+    tabL.style.color = 'var(--cyan)'; tabL.style.borderBottomColor = 'var(--cyan)';
+    tabC.style.color = 'var(--muted)'; tabC.style.borderBottomColor = 'transparent';
+    sub.textContent = 'avg ms per call, hourly';
+    drawLineChart('dash-calls-chart', DASH_DATA.latencyPerCall, '#43d1c6');
+  }
+}
+
+function drawAgentDashboard() {
+  if (window._chartTab === 'latency') drawLineChart('dash-calls-chart', DASH_DATA.latencyPerCall, '#43d1c6');
+  else drawLineChart('dash-calls-chart', DASH_DATA.callsOverTime, '#5da9ff');
+  drawDonut('donut-tokens', DASH_DATA.tokens);
+  buildLegend('legend-tokens', DASH_DATA.tokens);
+  drawDonut('donut-tools', DASH_DATA.tools);
+  buildLegend('legend-tools', DASH_DATA.tools);
+  drawDonut('donut-a2a', DASH_DATA.a2a);
+  buildLegend('legend-a2a', DASH_DATA.a2a, (name) => { showTab('traces'); showToast('Filtered by peer: ' + name, '#5da9ff'); });
+  drawDonut('donut-alerts', DASH_DATA.alerts);
+  buildLegend('legend-alerts', DASH_DATA.alerts, (name) => { showTab('alerts'); filterAlertsByReason(name); });
+}
+
+// ── Alerts tab ───────────────────────────────────────────────────────────────
+function renderAlertPills() {
+  const total = DASH_DATA.alerts.reduce((s,d) => s + d.value, 0);
+  const el = document.getElementById('alert-pills');
+  if (!el) return;
+  // "All" pill first
+  const all = `<div class="alert-pill" data-reason="" onclick="filterAlertsByReason('')" style="padding:8px 14px; border-radius:999px; background:var(--panel2); border:1px solid var(--blue); cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--blue); font-weight:600;">
+    <span style="width:8px; height:8px; border-radius:50%; background:var(--blue);"></span>
+    All reasons
+    <span style="background:rgba(93,169,255,.2); padding:1px 7px; border-radius:999px; font-size:11px; font-weight:700;">${total}</span>
+  </div>`;
+  el.innerHTML = all + DASH_DATA.alerts.map(s => `
+    <div class="alert-pill" data-reason="${esc(s.name)}" onclick="filterAlertsByReason('${esc(s.name)}')" style="padding:8px 14px; border-radius:999px; background:var(--panel2); border:1px solid var(--line); cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-size:12px; transition:all .15s;">
+      <span style="width:8px; height:8px; border-radius:50%; background:${s.color};"></span>
+      <span style="font-family:'JetBrains Mono',monospace;">${esc(s.name)}</span>
+      <span style="background:${s.color}33; color:${s.color}; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:700;">${s.value}</span>
+    </div>`).join('');
+  // Click style on hover
+  el.querySelectorAll('.alert-pill').forEach(p => {
+    p.addEventListener('mouseenter', () => { if (!p.classList.contains('active')) p.style.borderColor = 'var(--muted)'; });
+    p.addEventListener('mouseleave', () => { if (!p.classList.contains('active')) p.style.borderColor = 'var(--line)'; });
+  });
+}
+function filterAlertsByReason(name) {
+  document.querySelectorAll('#alert-pills .alert-pill').forEach(p => {
+    const isActive = p.dataset.reason === name;
+    p.style.borderColor = isActive ? 'var(--blue)' : 'var(--line)';
+    p.style.background = isActive ? 'rgba(93,169,255,.08)' : 'var(--panel2)';
+    p.classList.toggle('active', isActive);
+  });
+  document.getElementById('alert-filter-label').textContent = name ? '(' + name + ')' : '(all reasons)';
+  if (name) showToast('Filtered by ' + name, '#5da9ff');
+}
+function changeAlertAgent(name) {
+  showToast(name ? 'Showing alerts for ' + name : 'Showing all agents', '#5da9ff');
+  setTimeout(renderAlertPills, 30);
+}
+function filterAlertsByAgent(name) {
+  showTab('alerts');
+  document.getElementById('alerts-agent-picker').value = name;
+}
+function resetAlertFilter() {
+  filterAlertsByReason('');
+}
+
+function setTracesTime(el, range) {
+  el.parentElement.querySelectorAll('.time-opt').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+  showToast('Range: ' + range, '#5da9ff');
+}
+function setAlertsTime(el, range) {
+  el.parentElement.querySelectorAll('.time-opt').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+  showToast('Range: ' + range, '#5da9ff');
+  setTimeout(renderAlertPills, 30);
+}
+
+// ── Traces tab ───────────────────────────────────────────────────────────────
+function filterTracesByAgent(name) {
+  showTab('traces');
+  if (name) document.getElementById('traces-agent-picker').value = name;
+  document.getElementById('traces-active-agent').textContent = name || 'all agents';
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, color, duration) {
+  const t = document.getElementById('toast');
+  t.style.display = 'flex'; t.style.opacity = '1';
+  t.style.color = color || 'var(--green)';
+  const isError = color === '#e05252';
+  const icon = isError
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+  t.innerHTML = `${icon} ${esc(msg)}`;
+  if (isError) { t.style.borderColor = 'var(--red)'; t.style.background = 'rgba(224,82,82,.12)'; }
+  else { t.style.borderColor = 'var(--line)'; t.style.background = 'var(--panel)'; }
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    t.style.opacity = '0';
+    setTimeout(() => { t.style.display = 'none'; }, 300);
+  }, duration || 2200);
+}
+function showSavedToast() { showToast('Saved to Redis', '#1fbf75'); }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+window._currentSteps = TRACE_DATA['trace-bitcoin'].sequence_steps;
+window.addEventListener('load', () => {
+  setTimeout(drawAgentDashboard, 100);
+});
+window.addEventListener('resize', () => {
+  setTimeout(drawAgentDashboard, 100);
+  setTimeout(drawAlertsDonut, 100);
+});
+</script>
+</body>
+</html>

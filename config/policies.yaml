@@ -1,63 +1,292 @@
-# Per-agent policies. Primary config file.
+# Per-agent policies. Primary config file — Sprint S2 unified schema.
 #
 # Key = agent_id (claimed by the agent at POST /register). The keyset is the
 # implicit allowlist: an agent registering under an id without an entry here
 # will have every request denied with reason `policy-not-found`.
 #
-# Policy fields:
-#   allowed_remote_agents  — A2A allowlist (which peers this agent may call).
-#   allowed_mcp_servers    — MCP-server allowlist (which servers this agent
-#                            may reach at all — tools/list, tools/call, etc.).
-#   allowed_tools          — Per-server, which tools may be INVOKED. Tool
-#                            discovery (`tools/list`) is governed by
-#                            allowed_mcp_servers; tool invocation requires
-#                            the tool to be named here too.
-#   allowed_llms           — LLM provider + model allowlist (matched against
-#                            the upstream Host by the policy addon).
-#   limits                 — soft + hard caps (tokens/min, request size, ...).
+# Schema fields:
+#   name                    — must match the YAML key (agent_id)
+#   max_tokens_per_turn     — per-session token cap (0 = unlimited)
+#   max_tool_calls_per_turn — per-session MCP tool-call cap (0 = unlimited)
+#   max_agent_calls_per_turn— per-session A2A call cap (0 = unlimited)
+#   allowed_llm_providers   — provider allowlist; any model from the provider is ok
+#   token_rate_limits       — time-window budgets (enforced by counters.py T2-9)
+#   on_budget_exceeded      — block | allow  (budget / per-turn limit crossed)
+#   on_violation            — block | allow  (graph / policy violation)
+#   mode                    — flexible | strict
+#   allowed_tools           — flat list of MCP tool names (flexible mode)
+#   allowed_agents          — flat list of peer agent ids this agent may call (A2A)
+#   graph                   — ordered execution graph (strict mode only)
 
 policies:
 
   agent-sdk:
-    # agent-sdk is the user-facing planner: routes to agent-sdk1 (bitcoin
-    # path) or agent-sdk2 (everything else) after an LLM classification call.
-    allowed_remote_agents: [agent-sdk1, agent-sdk2]
-    allowed_mcp_servers:   [demo-mcp]
-    allowed_tools:
-      # agent-sdk loads MCP tools at startup (MultiServerMCPClient.get_tools)
-      # but does not invoke them itself. Keeping web_search here is a no-op
-      # for traffic; it just keeps the handshake consistent with the other
-      # agents.
-      demo-mcp: [web_search]
-    allowed_llms:
-      - provider: openai
-        models: [gpt-4.1-mini]
-    limits:
-      max_tokens_per_minute: 20000
-      max_request_size_bytes: 262144
+    # agent-sdk is the user-facing planner: routes to agent-sdk1 / agent-sdk2
+    # after an LLM classification call, and may invoke web_search itself.
+    name: agent-sdk
+    max_tokens_per_turn: 10000
+    max_tool_calls_per_turn: 20
+    max_agent_calls_per_turn: 5
+    allowed_llm_providers: [openai]
+    token_rate_limits:
+      - window: 10m
+        max_tokens: 5000
+      - window: 1h
+        max_tokens: 20000
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search]
+    allowed_agents: [agent-sdk1, agent-sdk2]
 
   agent-sdk1:
-    # Bitcoin cascade: LLM-only, no tools, no outbound A2A.
-    allowed_remote_agents: []
-    allowed_mcp_servers:   [demo-mcp]
-    allowed_tools:
-      demo-mcp: [web_search]
-    allowed_llms:
-      - provider: openai
-        models: [gpt-4.1-mini]
-    limits:
-      max_tokens_per_minute: 10000
+    # Bitcoin cascade: LLM + web_search only, no outbound A2A.
+    name: agent-sdk1
+    max_tokens_per_turn: 10000
+    max_tool_calls_per_turn: 20
+    max_agent_calls_per_turn: 5
+    allowed_llm_providers: [openai]
+    token_rate_limits:
+      - window: 10m
+        max_tokens: 2000
+      - window: 1h
+        max_tokens: 10000
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search]
+    allowed_agents: []
 
   agent-sdk2:
     # Weather / generic cascade. Allowed to invoke web_search.
     # dummy_email is deliberately OMITTED — this is what makes ST-S1.12
-    # (Integration — NY news) deny.
-    allowed_remote_agents: []
-    allowed_mcp_servers:   [demo-mcp]
-    allowed_tools:
-      demo-mcp: [web_search]
-    allowed_llms:
-      - provider: openai
-        models: [gpt-4.1-mini]
-    limits:
-      max_tokens_per_minute: 10000
+    # (Integration — NY news) deny with tool-not-allowed.
+    name: agent-sdk2
+    max_tokens_per_turn: 10000
+    max_tool_calls_per_turn: 20
+    max_agent_calls_per_turn: 5
+    allowed_llm_providers: [openai]
+    token_rate_limits:
+      - window: 10m
+        max_tokens: 2000
+      - window: 1h
+        max_tokens: 10000
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search]
+    allowed_agents: []
+
+  # ── S2 system-test agents ─────────────────────────────────────────────────
+  # These agents are used exclusively by tests/test_s2.py. Each covers one
+  # or more ST-S2.* scenario. They register dynamically; policies here define
+  # what the proxy enforces.
+
+  test-strict:
+    # ST-S2.1 (correct sequence), ST-S2.2 (wrong order), ST-S2.11 (audit).
+    name: test-strict
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: strict
+    allowed_tools: [web_search, dummy_email]
+    allowed_agents: []
+    graph:
+      start_step: 1
+      steps:
+        - step_id: 1
+          call_type: tool
+          callee_id: web_search
+          max_loops: 1
+          next_steps: [2]
+        - step_id: 2
+          call_type: tool
+          callee_id: dummy_email
+          max_loops: 1
+          next_steps: []
+
+  test-strict-allow:
+    # ST-S2.5: on_violation:allow — wrong step passes through; alert written.
+    name: test-strict-allow
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: allow
+    mode: strict
+    allowed_tools: [web_search, dummy_email]
+    allowed_agents: []
+    graph:
+      start_step: 1
+      steps:
+        - step_id: 1
+          call_type: tool
+          callee_id: web_search
+          max_loops: 1
+          next_steps: [2]
+        - step_id: 2
+          call_type: tool
+          callee_id: dummy_email
+          max_loops: 1
+          next_steps: []
+
+  test-strict-loop:
+    # ST-S2.6: max_loops:1, no next steps → second call gets 429.
+    name: test-strict-loop
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: []
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: strict
+    allowed_tools: [web_search]
+    allowed_agents: []
+    graph:
+      start_step: 1
+      steps:
+        - step_id: 1
+          call_type: tool
+          callee_id: web_search
+          max_loops: 1
+          next_steps: []
+
+  test-flexible:
+    # ST-S2.3 (any order), ST-S2.4 (unlisted tool denied).
+    name: test-flexible
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search, dummy_email]
+    allowed_agents: []
+
+  test-low-tokens:
+    # ST-S2.7: max_tokens_per_turn:50 — pre-seeded counter triggers 403.
+    name: test-low-tokens
+    max_tokens_per_turn: 50
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: []
+
+  test-low-tools:
+    # ST-S2.8: max_tool_calls_per_turn:1 — second tool call gets 403.
+    name: test-low-tools
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 1
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search, dummy_email]
+    allowed_agents: []
+
+  test-rate-limit:
+    # ST-S2.9: 1-minute window of 50 tokens — pre-seeded TS triggers 403.
+    name: test-rate-limit
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits:
+      - window: 1m
+        max_tokens: 50
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: []
+
+  test-a2a-caller:
+    # ST-S2.10: makes A2A call to test-a2a-callee; trace propagates.
+    name: test-a2a-caller
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 5
+    allowed_llm_providers: []
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: [test-a2a-callee]
+
+  test-a2a-callee:
+    # ST-S2.10, ST-S2.12, ST-S2.13: receives A2A; makes LLM calls.
+    name: test-a2a-callee
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: []
+
+  # ── S3 system-test agents ─────────────────────────────────────────────────
+  # These agents are used exclusively by tests/test_s3.py.
+
+  test-s3-mcp-only:
+    # ST-S3.2 (MCP allowed), ST-S3.3 (MCP denied): has web_search but NOT
+    # dummy_email so that calling dummy_email gives tool-not-allowed.
+    name: test-s3-mcp-only
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: [openai]
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: [web_search]
+    allowed_agents: []
+
+  test-s3-caller:
+    # ST-S3.4 (A2A allowed), ST-S3.5 (A2A denied): may call test-s3-callee only.
+    name: test-s3-caller
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 5
+    allowed_llm_providers: []
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: [test-s3-callee]
+
+  test-s3-callee:
+    # ST-S3.4, ST-S3.5: A2A target for Router routing tests.
+    # Registered with a2a_host+a2a_port in conftest.py.
+    name: test-s3-callee
+    max_tokens_per_turn: 0
+    max_tool_calls_per_turn: 0
+    max_agent_calls_per_turn: 0
+    allowed_llm_providers: []
+    token_rate_limits: []
+    on_budget_exceeded: block
+    on_violation: block
+    mode: flexible
+    allowed_tools: []
+    allowed_agents: []

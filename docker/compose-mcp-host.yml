@@ -1,0 +1,27 @@
+# Simulates MCP servers running on a separate host.
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/compose-mcp-host.yml up --build
+#
+# The MCP server self-registers with the orchestrator at startup via
+# POST /register?kind=mcp. The Router addon resolves mcp:{name} from
+# Redis and rewrites the upstream connection — no shared Docker network
+# or DNS required.
+
+name: amaze-mcp
+
+services:
+  demo-mcp:
+    build:
+      context: ..
+      dockerfile: examples/mcp_server/Dockerfile
+    container_name: demo-mcp
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}

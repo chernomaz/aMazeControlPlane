@@ -12,75 +12,128 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from dataclasses import dataclass, field
-from typing import Any
+import re
 
 import yaml
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Policy:
-    agent_id: str
-    allowed_remote_agents: list[str] = field(default_factory=list)
-    allowed_mcp_servers: list[str] = field(default_factory=list)
-    # { mcp_server_name: [tool_names] }
-    allowed_tools: dict[str, list[str]] = field(default_factory=dict)
-    # [{provider, models: [...]}]
-    allowed_llms: list[dict[str, Any]] = field(default_factory=list)
-    limits: dict[str, Any] = field(default_factory=dict)
+# ---------------------------------------------------------------------------
+# Schema (pydantic v2 — extra="forbid" everywhere for fail-loud validation)
+# ---------------------------------------------------------------------------
+
+class RateLimit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    window: str        # e.g. "10m", "1h", "30s"
+    max_tokens: int
+
+    @field_validator("window")
+    @classmethod
+    def _validate_window(cls, v: str) -> str:
+        if not re.fullmatch(r"\d+[smh]", v):
+            raise ValueError(
+                f"invalid window {v!r}: must be a positive integer followed by s/m/h"
+            )
+        return v
 
 
-class Policies:
-    """Container keyed by agent_id. Missing key = fail-closed deny."""
-
-    def __init__(self, by_agent: dict[str, Policy]) -> None:
-        self._by_agent = by_agent
-
-    def get(self, agent_id: str) -> Policy | None:
-        return self._by_agent.get(agent_id)
-
-    def __contains__(self, agent_id: str) -> bool:
-        return agent_id in self._by_agent
+class GraphStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    step_id: int
+    call_type: str     # "tool" | "agent"
+    callee_id: str
+    max_loops: int = 1
+    next_steps: list[int] = []
 
 
-def load_policies(path: pathlib.Path) -> Policies:
-    """Parse policies.yaml into a Policies container.
+class Graph(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    start_step: int
+    steps: list[GraphStep]
+
+    @model_validator(mode="after")
+    def _validate_step_refs(self) -> "Graph":
+        step_ids = {s.step_id for s in self.steps}
+        if self.start_step not in step_ids:
+            raise ValueError(
+                f"start_step {self.start_step} not in step_ids {sorted(step_ids)}"
+            )
+        for step in self.steps:
+            for next_id in step.next_steps:
+                if next_id not in step_ids:
+                    raise ValueError(
+                        f"step {step.step_id}: next_steps references "
+                        f"non-existent step_id {next_id}"
+                    )
+        return self
+
+
+class Policy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    max_tokens_per_turn: int = 0          # 0 = unlimited
+    max_tool_calls_per_turn: int = 0      # 0 = unlimited
+    max_agent_calls_per_turn: int = 0     # 0 = unlimited
+    allowed_llm_providers: list[str] = []
+    token_rate_limits: list[RateLimit] = []
+    on_budget_exceeded: str = "block"     # "block" | "allow"
+    on_violation: str = "block"           # "block" | "allow"
+    mode: str = "flexible"                # "strict" | "flexible"
+    allowed_tools: list[str] = []         # flat list (flexible mode)
+    allowed_agents: list[str] = []        # flat list (flexible and strict mode)
+    graph: Graph | None = None            # strict mode only
+
+
+# ---------------------------------------------------------------------------
+# Loader
+# ---------------------------------------------------------------------------
+
+def load_policies(path: pathlib.Path) -> dict[str, Policy]:
+    """Parse policies.yaml into a dict keyed by agent_id (== name field).
 
     Structure expected:
         policies:
           <agent_id>:
-            allowed_remote_agents: [...]
-            allowed_mcp_servers: [...]
-            allowed_tools: { server: [tool, ...] }
-            allowed_llms: [{provider, models}]
-            limits: {...}
+            name: <agent_id>    # must match the key
+            ...
     """
     if not path.exists():
         logger.warning("policies.yaml not found at %s — all requests will deny", path)
-        return Policies({})
+        return {}
 
     raw = yaml.safe_load(path.read_text()) or {}
-    entries = (raw.get("policies") or {})
+    entries = raw.get("policies") or {}
     by_agent: dict[str, Policy] = {}
     for agent_id, spec in entries.items():
-        spec = spec or {}
-        by_agent[agent_id] = Policy(
-            agent_id=agent_id,
-            allowed_remote_agents=list(spec.get("allowed_remote_agents") or []),
-            allowed_mcp_servers=list(spec.get("allowed_mcp_servers") or []),
-            allowed_tools={
-                k: list(v or []) for k, v in (spec.get("allowed_tools") or {}).items()
-            },
-            allowed_llms=list(spec.get("allowed_llms") or []),
-            limits=dict(spec.get("limits") or {}),
-        )
+        spec = dict(spec or {})
+        # Inject `name` from the YAML key so callers don't have to repeat it,
+        # but honour an explicit name field if present (they must agree).
+        spec.setdefault("name", agent_id)
+        policy = Policy.model_validate(spec)
+        if policy.name != agent_id:
+            raise ValueError(
+                f"Policy key '{agent_id}' does not match name field '{policy.name}'"
+            )
+        by_agent[agent_id] = policy
     logger.info("loaded %d policies from %s", len(by_agent), path)
-    return Policies(by_agent)
+    return by_agent
 
 
-# --- classification -------------------------------------------------------
+def load_policies_from_yaml(path: str | pathlib.Path = "config/policies.yaml") -> dict[str, Policy]:
+    """Public wrapper around `load_policies` accepting str or Path.
+
+    Used by `policy_store.bootstrap_from_yaml` and the YAML-fallback in
+    `policy_store.get_policy`. Returns `{}` if the file is missing — the
+    caller decides whether that's an error.
+    """
+    return load_policies(pathlib.Path(path))
+
+
+# ---------------------------------------------------------------------------
+# Classification helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 LLM_HOSTS: set[str] = {
     "api.openai.com",
@@ -91,20 +144,6 @@ LLM_HOSTS: set[str] = {
 def is_llm_host(host: str) -> bool:
     """True if `host` is a known LLM provider endpoint."""
     return host in LLM_HOSTS
-
-
-def llm_model_allowed(policy: Policy, provider: str, model: str) -> bool:
-    """Check a specific provider+model against the agent's allowed_llms list.
-
-    Matches if there is any entry `{provider: p}` where p equals `provider`
-    and `model` is in that entry's `models` list.
-    """
-    for entry in policy.allowed_llms:
-        if entry.get("provider") != provider:
-            continue
-        if model in (entry.get("models") or []):
-            return True
-    return False
 
 
 def host_to_provider(host: str) -> str | None:

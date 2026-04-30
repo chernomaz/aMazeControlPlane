@@ -1,19 +1,28 @@
 # User-facing demo: three agents + one MCP sibling. Layered ON TOP of the
-# platform compose files:
+# platform compose:
 #
 #   cd /path/to/newAmazeControlPlane/aMaze
 #   docker compose \
 #     -f docker/docker-compose.yml \
-#     -f docker/compose.networks.yml \
 #     -f examples/compose.yml \
 #     up --build
 #
 # Demo flow matches SPRINTS.md ST-S1.10 / .11 / .12 — POST to agent-sdk:
-#   curl -XPOST http://localhost:8080/chat -d '{"message":"search for current bitcoin price"}'
+#   curl -XPOST http://localhost:8090/chat -d '{"message":"search for current bitcoin price"}'
 #
-# Every sibling attaches to the internal net (no direct internet), mounts
-# the proxy CA read-only, and has HTTP_PROXY forced to the platform's
-# mitmproxy endpoint.
+# Network model:
+#   No internal-bridge isolation. Agents reach the platform's proxy +
+#   orchestrator over the host network via host.docker.internal:<port>
+#   (extra_hosts maps it on Linux). The platform exposes:
+#     :8080 — mitmproxy
+#     :8001 — orchestrator (POST /register, etc.)
+#   Agents on a DIFFERENT host override AMAZE_PROXY_HOST to the platform's
+#   public DNS / LAN IP.
+#
+# CA distribution:
+#   Co-resident agents bind-mount the `amaze-proxy-ca` volume read-only.
+#   For remote agents, fetch the CA out-of-band (planned: GET /ca.pem on
+#   the orchestrator).
 
 name: amaze
 
@@ -21,31 +30,34 @@ x-agent-defaults: &agent-defaults
   build:
     context: ..
     dockerfile: examples/agents/Dockerfile
-  networks:
-    - amaze-agent-net
   restart: unless-stopped
+  # Linux: make `host.docker.internal` resolve to the host's gateway.
+  # On Docker Desktop (Mac/Win) it resolves natively.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   depends_on:
     amaze:
       condition: service_started
   volumes:
     - amaze-proxy-ca:/etc/amaze/ca:ro
   environment: &agent-env
-    HTTP_PROXY: http://amaze:8080
-    HTTPS_PROXY: http://amaze:8080
-    NO_PROXY: amaze
-    AMAZE_ORCHESTRATOR_URL: http://amaze:8001
-    AMAZE_PROXY_URL: http://amaze:8080
+    HTTP_PROXY: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
+    HTTPS_PROXY: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
+    NO_PROXY: ${AMAZE_PROXY_HOST:-host.docker.internal}
+    AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8001
+    AMAZE_PROXY_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
     OPENAI_API_KEY: ${OPENAI_API_KEY}
 
 services:
 
   # ── Agents ─────────────────────────────────────────────────────────────
+  # Each agent publishes its A2A port to a unique symmetric host port and
+  # registers AMAZE_A2A_HOST + AMAZE_A2A_PORT with the orchestrator. The
+  # Router addon looks up agent:{id}:endpoint in Redis and rewrites the
+  # upstream host:port — no Docker DNS, no service-name resolution.
   agent-sdk:
     <<: *agent-defaults
     container_name: agent-sdk
-    networks:
-      - amaze-agent-net   # talks to proxy + peer agents (internal)
-      - amaze-frontend    # host-reachable for user-facing /chat
     build:
       context: ..
       dockerfile: examples/agents/Dockerfile
@@ -54,8 +66,11 @@ services:
     environment:
       <<: *agent-env
       AMAZE_AGENT_ID: agent-sdk
+      AMAZE_A2A_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+      AMAZE_A2A_PORT: "9002"
     ports:
-      - "8080:8080"     # user-facing /chat
+      - "8090:8080"     # user-facing /chat (8080 is taken by the proxy on the host)
+      - "9002:9002"     # A2A — symmetric mapping; proxy reaches via host.docker.internal:9002
 
   agent-sdk1:
     <<: *agent-defaults
@@ -68,6 +83,10 @@ services:
     environment:
       <<: *agent-env
       AMAZE_AGENT_ID: agent-sdk1
+      AMAZE_A2A_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+      AMAZE_A2A_PORT: "9003"
+    ports:
+      - "9003:9003"     # A2A — symmetric mapping; proxy reaches via host.docker.internal:9003
 
   agent-sdk2:
     <<: *agent-defaults
@@ -80,6 +99,10 @@ services:
     environment:
       <<: *agent-env
       AMAZE_AGENT_ID: agent-sdk2
+      AMAZE_A2A_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+      AMAZE_A2A_PORT: "9004"
+    ports:
+      - "9004:9004"     # A2A — symmetric mapping; proxy reaches via host.docker.internal:9004
 
   # ── MCP server ─────────────────────────────────────────────────────────
   demo-mcp:
@@ -87,22 +110,18 @@ services:
       context: ..
       dockerfile: examples/mcp_server/Dockerfile
     container_name: demo-mcp
-    networks:
-      - amaze-mcp-net    # reachable by the proxy (agents hit it here)
-      - amaze-egress     # outbound to api.tavily.com & friends
     restart: unless-stopped
     depends_on:
       amaze:
         condition: service_started
     volumes:
       - amaze-proxy-ca:/etc/amaze/ca:ro
+    ports:
+      - "8000:8000"     # proxy reaches this via host.docker.internal:8000
     environment:
       HOST: 0.0.0.0
       PORT: 8000
       # MCP-to-external-API calls (Tavily web_search, etc.) do NOT go
-      # through the aMaze proxy in step 1. The proxy governs
-      # agent→MCP traffic; the MCP server's own outbound calls are its
-      # operator's business. MCP code is operator-written (trusted), so
-      # we accept the reduced visibility here. (Step 2 will add an
-      # egress-allowlist category to the policy model.)
+      # through the aMaze proxy. The proxy governs agent→MCP traffic;
+      # the MCP server's own outbound calls are its operator's business.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}

@@ -2,16 +2,18 @@
 Orchestrator — passive registration + resolution service.
 
 Endpoints:
-  GET  /health             — liveness + Redis ping + CA presence.
-  POST /register           — agent registers; returns bearer token.
-  POST /register?kind=mcp  — MCP server registers its name/url/tools.
-  GET  /resolve/mcp/{name} — proxy asks where to forward an MCP call.
+  GET  /health                    — liveness + Redis ping + CA presence.
+  POST /register                  — agent registers; returns bearer token.
+  POST /register?kind=mcp         — MCP server registers its name/url/tools.
+  GET  /resolve/mcp/{name}        — proxy asks where to forward an MCP call.
+  GET  /resolve/agent/{agent_id}  — proxy asks where to forward an A2A call.
 
 Redis keyspace (used by both orchestrator and proxy):
-  session_token:{token}   STRING  → agent_id            (24h TTL)
-  session:{sid}:agent     STRING  → agent_id            (24h TTL)
-  mcp:{name}              STRING  → json(url, tools)    (no TTL)
-  agent_session:{aid}     STRING  → session_id          (24h TTL)
+  session_token:{token}        STRING  → agent_id                   (24h TTL)
+  session:{sid}:agent          STRING  → agent_id                   (24h TTL)
+  mcp:{name}                   STRING  → json(url, tools)           (no TTL)
+  agent_session:{aid}          STRING  → session_id                 (24h TTL)
+  agent:{agent_id}:endpoint    STRING  → http://{host}:{port}       (24h TTL)
 
 All mutations are atomic with respect to a single key (SET/SETEX). No
 multi-key transactions are needed in step 1.
@@ -32,6 +34,15 @@ import yaml
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from services.orchestrator.routers import agents as agents_router
+from services.orchestrator.routers import alerts as alerts_router
+from services.orchestrator.routers import export as export_router
+from services.orchestrator.routers import llms as llms_router
+from services.orchestrator.routers import mcp as mcp_router
+from services.orchestrator.routers import policy as policy_router
+from services.orchestrator.routers import traces as traces_router
+from services.proxy import policy_store
+
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
@@ -47,6 +58,8 @@ SESSION_TTL_SECONDS = 24 * 60 * 60
 
 class RegisterAgentRequest(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
+    a2a_host: str = Field(default="")
+    a2a_port: int = Field(default=9002)
 
 
 class RegisterAgentResponse(BaseModel):
@@ -67,6 +80,11 @@ class ResolveMCPResponse(BaseModel):
     tools: list[str]
 
 
+class ResolveAgentResponse(BaseModel):
+    agent_id: str
+    endpoint: str
+
+
 # --- App lifecycle --------------------------------------------------------
 
 @contextlib.asynccontextmanager
@@ -78,7 +96,11 @@ async def _lifespan(app: FastAPI):
     """
     app.state.redis = redis.from_url(REDIS_URL, decode_responses=True)
     await _bootstrap_mcp_servers(app.state.redis)
-    logger.info("orchestrator up: redis=%s config=%s", REDIS_URL, CONFIG_DIR)
+    # S4-T2.2: seed Redis policy:{agent_id} from YAML for any agent_id not
+    # yet present. Idempotent — never overwrites existing Redis values.
+    written = await policy_store.bootstrap_from_yaml()
+    logger.info("orchestrator up: redis=%s config=%s policies_seeded=%d",
+                REDIS_URL, CONFIG_DIR, written)
     try:
         yield
     finally:
@@ -86,6 +108,16 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="aMaze Orchestrator", version="0.1.0", lifespan=_lifespan)
+
+# S4-T1.2 — read-only GUI endpoints. Each lives in its own router module;
+# main.py keeps /health, /register and /resolve/* (Phase 2 will move them).
+app.include_router(agents_router.router)
+app.include_router(mcp_router.router)
+app.include_router(llms_router.router)
+app.include_router(traces_router.router)
+app.include_router(policy_router.router)
+app.include_router(alerts_router.router)
+app.include_router(export_router.router)
 
 
 async def _bootstrap_mcp_servers(r: redis.Redis) -> None:
@@ -157,6 +189,9 @@ async def _register_agent(req: RegisterAgentRequest) -> RegisterAgentResponse:
     pipe.setex(f"session_token:{bearer_token}", SESSION_TTL_SECONDS, req.agent_id)
     pipe.setex(f"session:{session_id}:agent", SESSION_TTL_SECONDS, req.agent_id)
     pipe.setex(f"agent_session:{req.agent_id}", SESSION_TTL_SECONDS, session_id)
+    if req.a2a_host:
+        endpoint = f"http://{req.a2a_host}:{req.a2a_port}"
+        pipe.setex(f"agent:{req.agent_id}:endpoint", SESSION_TTL_SECONDS, endpoint)
     await pipe.execute()
 
     logger.info("registered agent_id=%s session=%s", req.agent_id, session_id)
@@ -188,8 +223,13 @@ async def resolve_mcp(name: str) -> ResolveMCPResponse:
     return ResolveMCPResponse(name=name, url=data["url"], tools=data.get("tools", []))
 
 
-# Note: no /resolve/agent/{agent_id} endpoint. The proxy routes A2A by the
-# request's Host header via Docker DNS (compose service name == agent_id).
-# Authorization is done by the policy addon against `allowed_remote_agents`.
-# If a future deployment breaks the "DNS name == agent_id" convention,
-# reintroduce a resolver here.
+@app.get("/resolve/agent/{agent_id}", response_model=ResolveAgentResponse)
+async def resolve_agent(agent_id: str) -> ResolveAgentResponse:
+    try:
+        endpoint = await app.state.redis.get(f"agent:{agent_id}:endpoint")
+    except redis.RedisError as e:
+        logger.error("redis unreachable during resolve_agent(%s): %s", agent_id, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="agent-not-registered")
+    return ResolveAgentResponse(agent_id=agent_id, endpoint=endpoint)

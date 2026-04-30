@@ -10,7 +10,7 @@ import os
 
 import redis.asyncio as redis
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://host.docker.internal:6379")
 
 _client: redis.Redis | None = None
 

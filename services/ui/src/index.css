@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Mock raw colour tokens — preserved verbatim so styling matches services/ui_mock/index.html */
+    --bg: #0b1020;
+    --panel: #121a2b;
+    --panel2: #18233a;
+    --line: #2b3a59;
+    --muted-raw: #9fb0d1;
+    --text: #e8eefc;
+    --green: #1fbf75;
+    --yellow: #f2b94b;
+    --red: #e05252;
+    --blue: #5da9ff;
+    --violet: #a97cff;
+    --cyan: #43d1c6;
+
+    /* shadcn-style HSL tokens (drive Radix primitives, mapped to mock palette) */
+    --background: 225 51% 9%;          /* #0b1020 */
+    --foreground: 222 79% 95%;         /* #e8eefc */
+
+    --card: 222 41% 12%;               /* #121a2b */
+    --card-foreground: 222 79% 95%;
+
+    --popover: 222 41% 12%;
+    --popover-foreground: 222 79% 95%;
+
+    --primary: 212 100% 68%;           /* #5da9ff */
+    --primary-foreground: 225 51% 9%;
+
+    --secondary: 220 42% 16%;          /* #18233a */
+    --secondary-foreground: 222 79% 95%;
+
+    --muted: 220 42% 16%;
+    --muted-foreground: 220 30% 72%;   /* #9fb0d1 */
+
+    --accent: 220 42% 16%;
+    --accent-foreground: 222 79% 95%;
+
+    --destructive: 0 71% 60%;          /* #e05252 */
+    --destructive-foreground: 222 79% 95%;
+
+    --border: 220 35% 26%;             /* #2b3a59 */
+    --input: 220 42% 16%;
+    --ring: 212 100% 68%;
+
+    --radius: 0.5rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body, #root { min-height: 100vh; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--panel); }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+}
+
+@layer base {
+  * { @apply border-border; }
+}

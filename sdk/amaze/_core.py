@@ -27,6 +27,7 @@ class Config:
     orchestrator_url: str = ""
     chat_port: int = 8080
     a2a_port: int = 9002
+    a2a_host: str = ""
     session_id: str | None = None
     bearer_token: str | None = None
     # Lock guards late assignment to bearer_token from the registration
@@ -106,6 +107,7 @@ def load(agent_id_override: str | None = None) -> Config:
     ).rstrip("/")
     _config.chat_port = int(os.environ.get("AMAZE_CHAT_PORT", "8080"))
     _config.a2a_port = int(os.environ.get("AMAZE_A2A_PORT", "9002"))
+    _config.a2a_host = os.environ.get("AMAZE_A2A_HOST", "").strip()
     return _config
 
 
@@ -141,7 +143,11 @@ def register_and_wait(on_ready: threading.Event) -> None:
     agent_id is invalid, a 500 means the orchestrator is broken — all of
     which retries won't fix, and retrying a 4xx just multiplies log noise.
     """
-    body = json.dumps({"agent_id": _config.agent_id}).encode()
+    payload = {"agent_id": _config.agent_id}
+    if _config.a2a_host:
+        payload["a2a_host"] = _config.a2a_host
+        payload["a2a_port"] = _config.a2a_port
+    body = json.dumps(payload).encode()
 
     for attempt in range(30):
         try:

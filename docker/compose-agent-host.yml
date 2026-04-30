@@ -1,0 +1,83 @@
+# Simulates agents running on a separate host.
+# Usage (same host simulation):
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/compose-agent-host.yml up --build
+#
+# For real different host, set AMAZE_PROXY_HOST to the platform's IP and
+# AMAZE_A2A_HOST to this agent host's IP.
+#
+# Agents register AMAZE_A2A_HOST:AMAZE_A2A_PORT with the orchestrator.
+# The Router addon resolves agent:{id}:endpoint from Redis and rewrites
+# the upstream connection — no shared Docker network or DNS required.
+
+name: amaze-agents
+
+x-agent-defaults: &agent-defaults
+  build:
+    context: ..
+    dockerfile: examples/agents/Dockerfile
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - amaze-proxy-ca:/etc/amaze/ca:ro
+  environment: &agent-env
+    HTTP_PROXY: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
+    HTTPS_PROXY: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
+    NO_PROXY: ${AMAZE_PROXY_HOST:-host.docker.internal}
+    AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8001
+    AMAZE_PROXY_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8080
+    AMAZE_A2A_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+    OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+services:
+  agent-sdk:
+    <<: *agent-defaults
+    container_name: agent-sdk
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk
+      AMAZE_A2A_PORT: "9002"
+    ports:
+      - "8090:8080"
+      - "9002:9002"
+
+  agent-sdk1:
+    <<: *agent-defaults
+    container_name: agent-sdk1
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk1
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk1
+      AMAZE_A2A_PORT: "9003"
+    ports:
+      - "9003:9003"
+
+  agent-sdk2:
+    <<: *agent-defaults
+    container_name: agent-sdk2
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk2
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk2
+      AMAZE_A2A_PORT: "9004"
+    ports:
+      - "9004:9004"
+
+volumes:
+  amaze-proxy-ca:
+    external: true
+    name: amaze_amaze-proxy-ca

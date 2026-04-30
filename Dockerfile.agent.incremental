@@ -1,0 +1,23 @@
+# Incremental agent build — no internet required.
+#
+# Overlays the updated aMaze SDK source onto an existing agent image.
+# IMPORTANT: this only works correctly when the SDK is installed in editable
+# mode (`pip install -e /sdk` in the base agent Dockerfile). Editable installs
+# make Python read directly from /sdk/amaze/ at runtime, so replacing the
+# source files is sufficient — no pip reinstall needed.
+# If the base Dockerfile ever switches to a non-editable install, this file
+# will silently serve stale code and must be updated to run pip install too.
+#
+# Usage (build all three agents):
+#   docker build -f Dockerfile.agent.incremental \
+#     --build-arg FROM_IMAGE=amaze-agent-sdk:latest  -t amaze-agent-sdk:latest  .
+#   docker build -f Dockerfile.agent.incremental \
+#     --build-arg FROM_IMAGE=amaze-agent-sdk1:latest -t amaze-agent-sdk1:latest .
+#   docker build -f Dockerfile.agent.incremental \
+#     --build-arg FROM_IMAGE=amaze-agent-sdk2:latest -t amaze-agent-sdk2:latest .
+
+ARG FROM_IMAGE=amaze-agent-sdk:latest
+FROM ${FROM_IMAGE}
+
+# Replace only the SDK source that changed in S3
+COPY sdk/amaze/ /sdk/amaze/
