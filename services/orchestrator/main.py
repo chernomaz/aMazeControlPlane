@@ -60,6 +60,8 @@ class RegisterAgentRequest(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
     a2a_host: str = Field(default="")
     a2a_port: int = Field(default=9002)
+    chat_host: str = Field(default="")
+    chat_port: int = Field(default=8080)
 
 
 class RegisterAgentResponse(BaseModel):
@@ -192,6 +194,12 @@ async def _register_agent(req: RegisterAgentRequest) -> RegisterAgentResponse:
     if req.a2a_host:
         endpoint = f"http://{req.a2a_host}:{req.a2a_port}"
         pipe.setex(f"agent:{req.agent_id}:endpoint", SESSION_TTL_SECONDS, endpoint)
+    if req.chat_host:
+        chat_endpoint = f"http://{req.chat_host}:{req.chat_port}"
+        pipe.setex(f"agent:{req.agent_id}:chat_endpoint", SESSION_TTL_SECONDS, chat_endpoint)
+    # Default to pending — operator must explicitly approve via POST /agents/{id}/approve.
+    # SETNX preserves a pre-existing approval decision (operator approved before agent registered).
+    pipe.setnx(f"agent:{req.agent_id}:approved", "false")
     await pipe.execute()
 
     logger.info("registered agent_id=%s session=%s", req.agent_id, session_id)

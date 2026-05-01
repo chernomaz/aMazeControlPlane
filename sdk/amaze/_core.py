@@ -26,6 +26,7 @@ class Config:
     proxy_url: str = ""
     orchestrator_url: str = ""
     chat_port: int = 8080
+    chat_host: str = ""
     a2a_port: int = 9002
     a2a_host: str = ""
     session_id: str | None = None
@@ -106,6 +107,7 @@ def load(agent_id_override: str | None = None) -> Config:
         "AMAZE_ORCHESTRATOR_URL", "http://amaze:8001"
     ).rstrip("/")
     _config.chat_port = int(os.environ.get("AMAZE_CHAT_PORT", "8080"))
+    _config.chat_host = os.environ.get("AMAZE_CHAT_HOST", "").strip()
     _config.a2a_port = int(os.environ.get("AMAZE_A2A_PORT", "9002"))
     _config.a2a_host = os.environ.get("AMAZE_A2A_HOST", "").strip()
     return _config
@@ -147,6 +149,9 @@ def register_and_wait(on_ready: threading.Event) -> None:
     if _config.a2a_host:
         payload["a2a_host"] = _config.a2a_host
         payload["a2a_port"] = _config.a2a_port
+    if _config.chat_host:
+        payload["chat_host"] = _config.chat_host
+        payload["chat_port"] = _config.chat_port
     body = json.dumps(payload).encode()
 
     for attempt in range(30):

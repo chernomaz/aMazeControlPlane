@@ -3,7 +3,9 @@
 Source of truth for per-agent policies is Redis: `policy:{agent_id}` →
 JSON-encoded `Policy`. YAML at `config/policies.yaml` is read once at
 boot via `bootstrap_from_yaml()` and ONLY for entries not yet in Redis
-(idempotent — never overwrites Redis values).
+(idempotent — never overwrites Redis values). At runtime, no read path
+touches YAML — Redis miss returns None, callers translate to a deny per
+CLAUDE.md §9.
 
 The proxy enforcer refetches per-request via `get_policy()` so that a
 PUT through the orchestrator takes effect on the very next call without
@@ -23,7 +25,6 @@ import logging
 import os
 import pathlib
 
-import redis.asyncio as redis
 from pydantic import ValidationError
 
 from services.proxy._redis import client as redis_client
@@ -41,13 +42,12 @@ def _key(agent_id: str) -> str:
 async def get_policy(agent_id: str) -> Policy | None:
     """Return the Pydantic Policy for `agent_id`, or None if absent.
 
-    Reads `policy:{agent_id}` from Redis first. If absent there, falls back
-    to the YAML file (read each call — cheap; YAML is tiny). Does NOT auto-
-    bootstrap on read — only the explicit `bootstrap_from_yaml()` call
-    writes to Redis.
+    Reads `policy:{agent_id}` from Redis. Returns None on Redis miss —
+    no YAML fallback at runtime; callers translate None to a deny
+    (`policy-not-found`) per CLAUDE.md §9.
 
     Returns None on:
-      * key missing in both Redis and YAML
+      * key missing in Redis
       * malformed JSON in Redis (logged)
       * Pydantic validation failure (logged)
 
@@ -56,19 +56,15 @@ async def get_policy(agent_id: str) -> Policy | None:
     """
     r = await redis_client()
     raw = await r.get(_key(agent_id))
-    if raw is not None:
-        try:
-            return Policy.model_validate_json(raw)
-        except (ValidationError, ValueError) as e:
-            logger.error(
-                "policy_store: malformed policy JSON for %s: %s", agent_id, e,
-            )
-            return None
-
-    # Redis miss → YAML fallback (read-only, no write).
-    yaml_path = CONFIG_DIR / "policies.yaml"
-    yaml_policies = load_policies_from_yaml(yaml_path)
-    return yaml_policies.get(agent_id)
+    if raw is None:
+        return None
+    try:
+        return Policy.model_validate_json(raw)
+    except (ValidationError, ValueError) as e:
+        logger.error(
+            "policy_store: malformed policy JSON for %s: %s", agent_id, e,
+        )
+        return None
 
 
 async def put_policy(agent_id: str, policy: Policy) -> None:
@@ -87,23 +83,16 @@ async def put_policy(agent_id: str, policy: Policy) -> None:
 
 
 async def list_policy_ids() -> set[str]:
-    """Union of agent_ids present in Redis (`policy:*`) and in YAML."""
+    """Agent_ids present in Redis as `policy:*`.
+
+    Raises `redis.RedisError` on transport failure — callers translate to
+    a 503 deny per CLAUDE.md §9.
+    """
     ids: set[str] = set()
     r = await redis_client()
-    try:
-        async for key in r.scan_iter(match="policy:*"):
-            # Strip "policy:" prefix.
-            if key.startswith("policy:"):
-                ids.add(key[len("policy:"):])
-    except redis.RedisError as e:
-        logger.error("policy_store: redis scan failed: %s", e)
-        # Don't raise — caller may still want YAML names.
-
-    yaml_path = CONFIG_DIR / "policies.yaml"
-    try:
-        ids.update(load_policies_from_yaml(yaml_path).keys())
-    except Exception as e:  # noqa: BLE001 — best effort
-        logger.warning("policy_store: yaml read failed: %s", e)
+    async for key in r.scan_iter(match="policy:*"):
+        if key.startswith("policy:"):
+            ids.add(key[len("policy:"):])
     return ids
 
 

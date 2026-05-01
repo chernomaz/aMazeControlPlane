@@ -2,9 +2,8 @@
 
 State classification (S4-T1.2):
   pending              - Redis `agent:{id}:approved` exists AND value == "false"
-  approved-with-policy - Redis `policy:{id}` exists OR YAML policies.yaml has
-                          an entry for the agent_id
-  approved-no-policy   - registered but no policy entry anywhere
+  approved-with-policy - Redis `policy:{id}` exists
+  approved-no-policy   - registered but no Redis policy entry
 
 Mutations:
   POST /agents/{id}/approve   - write `agent:{id}:approved` = "true"   (S4-T2.1)
@@ -26,14 +25,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import pathlib
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-import yaml
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -42,26 +38,6 @@ from services.proxy import policy_store
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-CONFIG_DIR = pathlib.Path(os.environ.get("CONFIG_DIR", "/app/config"))
-
-
-def _load_policy_map() -> dict[str, dict[str, Any]]:
-    """Read policies.yaml; return {agent_id: policy_dict}. {} on any error.
-
-    Errors are swallowed deliberately — a malformed YAML must not 500 the
-    list endpoint; the GUI just sees no YAML-side policies.
-    """
-    path = CONFIG_DIR / "policies.yaml"
-    if not path.exists():
-        return {}
-    try:
-        data = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
-        logger.warning("agents: policies.yaml unreadable: %s", e)
-        return {}
-    policies = data.get("policies") or {}
-    return policies if isinstance(policies, dict) else {}
 
 
 def _summarize_policy(policy: dict[str, Any]) -> dict[str, Any]:
@@ -80,44 +56,42 @@ def _summarize_policy(policy: dict[str, Any]) -> dict[str, Any]:
 @router.get("/agents")
 async def list_agents(request: Request) -> list[dict[str, Any]]:
     r = request.app.state.redis
-    yaml_policies = _load_policy_map()
 
     # 1. Collect agent_ids registered in Redis (have an endpoint key).
     registered: dict[str, str] = {}  # agent_id -> endpoint
     try:
         async for key in r.scan_iter(match="agent:*:endpoint"):
-            # Strip "agent:" prefix and ":endpoint" suffix.
             if not key.startswith("agent:") or not key.endswith(":endpoint"):
                 continue
             agent_id = key[len("agent:"):-len(":endpoint")]
             endpoint = await r.get(key)
             if endpoint:
                 registered[agent_id] = endpoint
-    except Exception as e:  # noqa: BLE001 — return what we have, don't 500
+    except Exception as e:  # noqa: BLE001 — fail closed on Redis errors
         logger.error("agents: redis scan failed: %s", e)
         raise HTTPException(status_code=503, detail="redis-unavailable") from e
 
-    # 2. Union with YAML-declared agent_ids.
-    all_ids = set(registered) | set(yaml_policies)
+    # 2. Fetch policy IDs to determine state label for registered agents.
+    # Only registered agents appear in the list — policy presence affects
+    # the state label (approved-with-policy vs approved-no-policy) but
+    # does not pull unregistered agents into the list.
+    try:
+        policy_ids = await policy_store.list_policy_ids()
+    except Exception as e:  # noqa: BLE001 — fail closed
+        logger.error("agents: list_policy_ids failed: %s", e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+
+    all_ids = set(registered)
 
     out: list[dict[str, Any]] = []
     for agent_id in sorted(all_ids):
-        # State classification — pending check first (explicit gate).
         approved_flag = None
         try:
             approved_flag = await r.get(f"agent:{agent_id}:approved")
         except Exception:  # noqa: BLE001
             approved_flag = None
 
-        # Policy presence: Redis (Phase 2 will populate) OR YAML (today).
-        has_redis_policy = False
-        try:
-            has_redis_policy = bool(await r.exists(f"policy:{agent_id}"))
-        except Exception:  # noqa: BLE001
-            has_redis_policy = False
-        has_yaml_policy = agent_id in yaml_policies
-        has_policy = has_redis_policy or has_yaml_policy
-
+        has_policy = agent_id in policy_ids
         if approved_flag == "false":
             state = "pending"
         elif has_policy:
@@ -125,9 +99,7 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
         else:
             state = "approved-no-policy"
 
-        # registered_at — best effort; we don't currently persist a timestamp,
-        # so report endpoint-key TTL remaining as a proxy ("seconds_left").
-        # GUI can render this as relative; absent for YAML-only entries.
+        # registered_at — best effort; we don't currently persist a timestamp.
         registered_at: float | None = None
 
         entry: dict[str, Any] = {
@@ -137,8 +109,12 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
         }
         if agent_id in registered:
             entry["endpoint"] = registered[agent_id]
-        if has_yaml_policy:
-            entry["policy_summary"] = _summarize_policy(yaml_policies[agent_id])
+        if has_policy:
+            policy = await policy_store.get_policy(agent_id)
+            if policy is not None:
+                entry["policy_summary"] = _summarize_policy(
+                    policy.model_dump(mode="json"),
+                )
         out.append(entry)
 
     return out
@@ -146,20 +122,15 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
 
 # --- Approve / reject (S4-T2.1) ------------------------------------------
 
-async def _agent_exists(r: Any, agent_id: str, yaml_policies: dict[str, Any]) -> bool:
-    """An agent is 'known' if it is registered (has an endpoint key) OR
-    has a policy entry in YAML. Mirrors the listing logic so the GUI can
-    approve YAML-declared agents before they ever register."""
-    if agent_id in yaml_policies:
-        return True
+async def _agent_exists(r: Any, agent_id: str) -> bool:
+    """An agent is 'known' only if it has registered (has an endpoint key)."""
     return bool(await r.exists(f"agent:{agent_id}:endpoint"))
 
 
 async def _set_agent_approved(request: Request, agent_id: str, approved: bool) -> dict[str, Any]:
     r = request.app.state.redis
-    yaml_policies = _load_policy_map()
     try:
-        if not await _agent_exists(r, agent_id, yaml_policies):
+        if not await _agent_exists(r, agent_id):
             raise HTTPException(status_code=404, detail="agent-not-found")
         await r.set(f"agent:{agent_id}:approved", "true" if approved else "false")
     except HTTPException:
@@ -178,6 +149,54 @@ async def approve_agent(agent_id: str, request: Request) -> dict[str, Any]:
 @router.post("/agents/{agent_id}/reject")
 async def reject_agent(agent_id: str, request: Request) -> dict[str, Any]:
     return await _set_agent_approved(request, agent_id, False)
+
+
+@router.delete("/agents/{agent_id}")
+async def remove_agent(agent_id: str, request: Request) -> dict[str, Any]:
+    r = request.app.state.redis
+    keys: list[str] = []
+    async for key in r.scan_iter(match=f"agent:{agent_id}:*"):
+        keys.append(key)
+    session_id = await r.get(f"agent_session:{agent_id}")
+    if session_id:
+        keys.append(f"agent_session:{agent_id}")
+        keys.append(f"session:{session_id}:agent")
+        async for key in r.scan_iter(match="session_token:*"):
+            val = await r.get(key)
+            if val == agent_id:
+                keys.append(key)
+    if keys:
+        await r.delete(*keys)
+    logger.info("removed agent agent_id=%s keys=%d", agent_id, len(keys))
+    return {"removed": agent_id}
+
+
+@router.get("/agents/{agent_id}/audit")
+async def agent_audit(
+    agent_id: str, request: Request, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Return the most recent audit log entries for an agent from Redis Streams."""
+    r = request.app.state.redis
+    try:
+        entries = await r.xrevrange(f"audit:{agent_id}", count=min(limit, 100))
+    except Exception as e:  # noqa: BLE001
+        logger.error("agent_audit: redis read failed for %s: %s", agent_id, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+    result = []
+    for _msg_id, fields in entries:
+        result.append({
+            "trace_id": fields.get("trace_id"),
+            "span_id": fields.get("span_id"),
+            "ts": fields.get("ts"),
+            "kind": fields.get("kind"),
+            "target": fields.get("target"),
+            "tool": fields.get("tool") or None,
+            "denied": fields.get("denied", "false").lower() == "true",
+            "denial_reason": fields.get("denial_reason") or None,
+            "input": fields.get("input"),
+            "output": fields.get("output"),
+        })
+    return result
 
 
 # --- Send message (S4-T3.3) ----------------------------------------------
@@ -502,9 +521,8 @@ async def agent_stats(
         )
 
     r = request.app.state.redis
-    yaml_policies = _load_policy_map()
     try:
-        if not await _agent_exists(r, agent_id, yaml_policies):
+        if not await _agent_exists(r, agent_id):
             raise HTTPException(status_code=404, detail="agent-not-found")
     except HTTPException:
         raise

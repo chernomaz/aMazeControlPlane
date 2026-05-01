@@ -21,7 +21,46 @@ def _safe_json_loads(content: bytes | str | None) -> dict:
         return {}
 
 
+def _extract_sse_body(content: bytes) -> str:
+    """Extract JSON payload from SSE (text/event-stream) response bytes.
+
+    MCP Streamable HTTP responses for tool calls arrive as SSE events:
+        event: message\r\ndata: {"jsonrpc":"2.0","result":...}\r\n\r\n
+
+    We collect all data: lines and return them joined. This lets the
+    audit log store the actual tool result instead of raw SSE framing.
+    """
+    text = content.decode("utf-8", errors="replace")
+    data_lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            payload = line[5:].lstrip(" ")
+            if payload and payload != "[DONE]":
+                data_lines.append(payload)
+    if data_lines:
+        # For a single data line (normal tool call result) return it directly.
+        # For multiple lines (unlikely for tool calls) join with newline.
+        return data_lines[-1] if len(data_lines) == 1 else "\n".join(data_lines)
+    return text  # fallback: raw SSE text
+
+
 class AuditLog:
+    async def responseheaders(self, flow: http.HTTPFlow) -> None:
+        """Force-buffer SSE responses so response() can read the full body.
+
+        mitmproxy streams chunked responses by default when no Content-Length
+        is set. For MCP streamable-HTTP tool calls the server replies with
+        text/event-stream; we need the complete body to capture the result.
+        """
+        if not flow.response:
+            return
+        ct = flow.response.headers.get("content-type", "").lower()
+        if "text/event-stream" in ct:
+            # Telling mitmproxy not to stream means it accumulates all chunks
+            # and calls response() only after the server closes the connection.
+            flow.response.stream = False
+
     async def response(self, flow: http.HTTPFlow) -> None:
         if flow.metadata.get("amaze_bypass"):
             return
@@ -53,12 +92,16 @@ class AuditLog:
 
         tool = flow.metadata.get("amaze_mcp_tool", "")
 
-        raw_input = (flow.request.content or b"")[:2000].decode("utf-8", errors="replace")
-        raw_output = (
-            (flow.response.content or b"")[:2000].decode("utf-8", errors="replace")
-            if flow.response
-            else ""
-        )
+        raw_input = (flow.request.content or b"")[:8000].decode("utf-8", errors="replace")
+        if flow.response:
+            resp_content = flow.response.content or b""
+            resp_ct = flow.response.headers.get("content-type", "").lower()
+            if "text/event-stream" in resp_ct and resp_content:
+                raw_output = _extract_sse_body(resp_content)[:8000]
+            else:
+                raw_output = resp_content[:8000].decode("utf-8", errors="replace")
+        else:
+            raw_output = ""
 
         denied = flow.response is not None and flow.response.status_code >= 400
 

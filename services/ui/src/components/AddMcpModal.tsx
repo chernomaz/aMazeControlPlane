@@ -11,7 +11,6 @@ import {
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
-import { Textarea } from './ui/textarea'
 import { createMcpServer } from '@/api/mcp'
 import { ApiError } from '@/api/client'
 
@@ -25,13 +24,11 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  const [toolsRaw, setToolsRaw] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const reset = () => {
     setName('')
     setUrl('')
-    setToolsRaw('')
     setError(null)
   }
 
@@ -62,10 +59,6 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
 
     const trimmedName = name.trim()
     const trimmedUrl = url.trim()
-    const tools = toolsRaw
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
 
     if (!trimmedName) {
       setError('Name is required.')
@@ -80,11 +73,7 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
       return
     }
 
-    mutation.mutate({
-      name: trimmedName,
-      url: trimmedUrl,
-      tools: tools.length > 0 ? tools : undefined,
-    })
+    mutation.mutate({ name: trimmedName, url: trimmedUrl })
   }
 
   const handleOpenChange = (next: boolean) => {
@@ -104,7 +93,7 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
         <DialogHeader>
           <DialogTitle>Add MCP Server</DialogTitle>
           <DialogDescription style={{ color: 'var(--muted-raw)' }}>
-            Manually register an MCP server. Leave the Tools field blank to auto-probe available tools.
+            Register an MCP server. Tools are discovered automatically by probing the server.
           </DialogDescription>
         </DialogHeader>
 
@@ -128,24 +117,10 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://web-tools-mcp:8200/sse"
+              placeholder="http://web-tools-mcp:8200/mcp"
               autoComplete="off"
               required
             />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <Label htmlFor="mcp-tools">Tools (comma-separated)</Label>
-            <Textarea
-              id="mcp-tools"
-              value={toolsRaw}
-              onChange={(e) => setToolsRaw(e.target.value)}
-              placeholder="web_search, fetch_url"
-              rows={3}
-            />
-            <span style={{ fontSize: 11, color: 'var(--muted-raw)' }}>
-              Leave blank to auto-probe tools from the server.
-            </span>
           </div>
 
           {error && (

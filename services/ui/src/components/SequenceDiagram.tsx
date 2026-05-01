@@ -14,6 +14,20 @@ const COLOR_BY_STATUS: Record<SequenceStepStatus, string> = {
   failed: 'var(--red)',
 }
 
+const LLM_PROVIDERS = new Set(['openai', 'anthropic', 'google', 'mistral', 'cohere', 'azure', 'bedrock', 'vertex'])
+
+function normalizeLane(name: string): string {
+  if (!name) return name
+  const lower = name.toLowerCase()
+  // "openai/gpt-4..." or "anthropic/claude-..." → "llm"
+  if (lower.includes('/')) {
+    const prefix = lower.split('/')[0]
+    if (LLM_PROVIDERS.has(prefix)) return 'llm'
+  }
+  if (LLM_PROVIDERS.has(lower)) return 'llm'
+  return name
+}
+
 const LANE_WIDTH = 140
 const ROW_HEIGHT = 40
 const HEADER_HEIGHT = 40
@@ -34,8 +48,8 @@ export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: 
     }
     // Force "user" first if it appears so the diagram reads left-to-right.
     for (const s of steps) {
-      see(s.from)
-      see(s.to)
+      see(normalizeLane(s.from))
+      see(normalizeLane(s.to))
     }
     const idx: Record<string, number> = {}
     order.forEach((name, i) => {
@@ -130,8 +144,8 @@ export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: 
       </defs>
 
       {steps.map((step, i) => {
-        const fromIdx = laneIndex[step.from] ?? 0
-        const toIdx = laneIndex[step.to] ?? fromIdx
+        const fromIdx = laneIndex[normalizeLane(step.from)] ?? 0
+        const toIdx = laneIndex[normalizeLane(step.to)] ?? fromIdx
         const x1 = laneX(fromIdx)
         const x2 = laneX(toIdx)
         const y = TOP_PADDING + HEADER_HEIGHT + i * ROW_HEIGHT + ROW_HEIGHT / 2

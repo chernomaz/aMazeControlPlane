@@ -48,7 +48,7 @@ const nodeTypes = { step: StepNode, finish: FinishNode }
 // ─── Layout (BFS from start_step) ────────────────────────────────────────────
 
 function computeLayout(g: Graph): Map<number, { x: number; y: number }> {
-  const stepMap = new Map(g.steps.map((s) => [s.step_id, s]))
+  const stepMap = new Map((g.steps ?? []).map((s) => [s.step_id, s]))
   const levels = new Map<number, number>()
   const queue: number[] = []
 
@@ -103,7 +103,7 @@ function computeLayout(g: Graph): Map<number, { x: number; y: number }> {
 export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
   const positions = computeLayout(g)
 
-  const stepNodes: Node[] = g.steps.map((s) => ({
+  const stepNodes: Node[] = (g.steps ?? []).map((s) => ({
     id: String(s.step_id),
     type: 'step',
     position: positions.get(s.step_id) ?? { x: 0, y: 0 },
@@ -131,8 +131,8 @@ export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
   }
 
   const edges: Edge[] = []
-  for (const s of g.steps) {
-    if (s.next_steps.length === 0) {
+  for (const s of g.steps ?? []) {
+    if ((s.next_steps ?? []).length === 0) {
       edges.push({
         id: `${s.step_id}->finish`,
         source: String(s.step_id),
@@ -141,7 +141,7 @@ export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
         style: { stroke: '#1fbf75' },
       })
     } else {
-      for (const n of s.next_steps) {
+      for (const n of s.next_steps ?? []) {
         edges.push({
           id: `${s.step_id}->${n}`,
           source: String(s.step_id),
@@ -226,7 +226,7 @@ export function validateGraph(g: Graph): { ok: true } | { ok: false; errors: str
 
   // Reachability from start_step (BFS)
   if (idSet.has(g.start_step)) {
-    const stepMap = new Map(g.steps.map((s) => [s.step_id, s]))
+    const stepMap = new Map((g.steps ?? []).map((s) => [s.step_id, s]))
     const reachable = new Set<number>([g.start_step])
     const queue = [g.start_step]
     while (queue.length) {

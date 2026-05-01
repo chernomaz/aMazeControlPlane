@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, ChevronDown, ChevronRight } from 'lucide-react'
@@ -20,6 +20,13 @@ import {
 } from '@/components/ui/table'
 import SequenceDiagram from '@/components/SequenceDiagram'
 
+function safeStr(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try { return JSON.stringify(v) } catch { return String(v) }
+}
+
 const MONO: React.CSSProperties = {
   fontFamily: 'JetBrains Mono, ui-monospace, monospace',
 }
@@ -34,7 +41,6 @@ const codeBlockStyle: React.CSSProperties = {
   color: 'var(--text)',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
-  maxHeight: 220,
   overflow: 'auto',
 }
 
@@ -124,7 +130,36 @@ function EdgesTable({
   selectedIndex: number | null
   onSelect: (i: number | null) => void
 }) {
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
+  // Track which rows have their input/output panel open.
+  // Clicking a row (or selecting via diagram) auto-opens it.
+  const [manualCollapsed, setManualCollapsed] = useState<Set<number>>(new Set())
+
+  // When selection changes from outside (diagram click), clear manual-collapse so it auto-opens.
+  useEffect(() => {
+    if (selectedIndex !== null) {
+      setManualCollapsed(s => { const next = new Set(s); next.delete(selectedIndex); return next })
+    }
+  }, [selectedIndex])
+
+  const isOpen = (i: number) => {
+    // Open if selected (via row click or diagram) AND not manually collapsed.
+    return selectedIndex === i && !manualCollapsed.has(i)
+  }
+
+  const handleRowClick = (i: number) => {
+    if (selectedIndex === i) {
+      // Toggle collapse/expand when clicking the already-selected row.
+      setManualCollapsed(s => {
+        const next = new Set(s)
+        if (next.has(i)) next.delete(i); else next.add(i)
+        return next
+      })
+    } else {
+      // Select a new row — clear manual collapse for it so it auto-opens.
+      setManualCollapsed(s => { const next = new Set(s); next.delete(i); return next })
+      onSelect(i)
+    }
+  }
 
   if (edges.length === 0) {
     return (
@@ -139,8 +174,7 @@ function EdgesTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead style={{ width: 36 }}></TableHead>
-            <TableHead>Turn</TableHead>
+            <TableHead style={{ width: 28 }}></TableHead>
             <TableHead>#</TableHead>
             <TableHead>Time</TableHead>
             <TableHead>Type</TableHead>
@@ -148,55 +182,31 @@ function EdgesTable({
             <TableHead>Indirect</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>Model</TableHead>
-            <TableHead>ms</TableHead>
             <TableHead>In</TableHead>
             <TableHead>Out</TableHead>
             <TableHead>Total</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Input</TableHead>
-            <TableHead>Output</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {edges.map((e, i) => {
             const isSelected = selectedIndex === i
-            const isOpen = !!expanded[i]
+            const open = isOpen(i)
             const rowStyle: React.CSSProperties = isSelected
-              ? {
-                  background: 'rgba(93,169,255,.08)',
-                  boxShadow: 'inset 0 0 0 1px var(--blue)',
-                }
+              ? { background: 'rgba(93,169,255,.08)', boxShadow: 'inset 0 0 0 1px var(--blue)' }
               : {}
-            const trim = (s: string, n: number) =>
-              !s ? '—' : s.length > n ? `${s.slice(0, n)}…` : s
             return (
               <>
                 <TableRow
                   key={`edge-${i}`}
                   style={{ ...rowStyle, cursor: 'pointer' }}
-                  onClick={() => onSelect(isSelected ? null : i)}
+                  onClick={() => handleRowClick(i)}
                 >
                   <TableCell>
-                    <button
-                      type="button"
-                      onClick={(ev) => {
-                        ev.stopPropagation()
-                        setExpanded((m) => ({ ...m, [i]: !m[i] }))
-                      }}
-                      aria-label={isOpen ? 'Collapse' : 'Expand'}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--muted-raw)',
-                        cursor: 'pointer',
-                        padding: 0,
-                        display: 'inline-flex',
-                      }}
-                    >
-                      {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </button>
+                    <span style={{ color: 'var(--muted-raw)', display: 'inline-flex' }}>
+                      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
                   </TableCell>
-                  <TableCell style={MONO}>{e.turn}</TableCell>
                   <TableCell style={MONO}>{e.index}</TableCell>
                   <TableCell style={{ ...MONO, fontSize: 11, color: 'var(--muted-raw)' }}>
                     {formatTs(e.ts)}
@@ -204,40 +214,30 @@ function EdgesTable({
                   <TableCell style={{ fontSize: 12 }}>{e.type}</TableCell>
                   <TableCell style={{ fontSize: 12, fontWeight: 600 }}>{e.name}</TableCell>
                   <TableCell style={{ fontSize: 12 }}>{e.indirect ? 'yes' : 'no'}</TableCell>
-                  <TableCell style={{ fontSize: 12, color: 'var(--muted-raw)' }}>
-                    {e.source || '—'}
-                  </TableCell>
+                  <TableCell style={{ fontSize: 12, color: 'var(--muted-raw)' }}>{e.source || '—'}</TableCell>
                   <TableCell style={{ ...MONO, fontSize: 11 }}>{e.model || '—'}</TableCell>
-                  <TableCell style={MONO}>{e.duration_ms}</TableCell>
-                  <TableCell style={MONO}>{e.input_tokens}</TableCell>
-                  <TableCell style={MONO}>{e.output_tokens}</TableCell>
-                  <TableCell style={MONO}>{e.total_tokens}</TableCell>
+                  <TableCell style={MONO}>{e.input_tokens || '—'}</TableCell>
+                  <TableCell style={MONO}>{e.output_tokens || '—'}</TableCell>
+                  <TableCell style={MONO}>{e.total_tokens || '—'}</TableCell>
                   <TableCell>{edgeStatusBadge(e.status)}</TableCell>
-                  <TableCell style={{ fontSize: 11, maxWidth: 180 }} title={e.input}>
-                    {trim(e.input ?? '', 40)}
-                  </TableCell>
-                  <TableCell style={{ fontSize: 11, maxWidth: 180 }} title={e.output}>
-                    {trim(e.output ?? '', 40)}
-                  </TableCell>
                 </TableRow>
-                {isOpen && (
-                  <TableRow key={`edge-${i}-detail`} style={rowStyle}>
-                    <TableCell colSpan={16} style={{ background: 'var(--panel2)' }}>
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '1fr 1fr',
-                          gap: 12,
-                          padding: '6px 4px',
-                        }}
-                      >
+                {open && (
+                  <TableRow key={`edge-${i}-detail`} style={{ background: 'var(--panel2)' }}>
+                    <TableCell colSpan={13} style={{ padding: '10px 12px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <div>
-                          <div style={{ ...labelStyle, marginBottom: 4 }}>Input</div>
-                          <div style={codeBlockStyle}>{e.input || '(empty)'}</div>
+                          <div style={{ ...labelStyle, marginBottom: 6 }}>Input</div>
+                          <div style={codeBlockStyle}>{safeStr(e.input) || '(empty)'}</div>
                         </div>
                         <div>
-                          <div style={{ ...labelStyle, marginBottom: 4 }}>Output</div>
-                          <div style={codeBlockStyle}>{e.output || '(empty)'}</div>
+                          <div style={{ ...labelStyle, marginBottom: 6 }}>Output</div>
+                          <div style={codeBlockStyle}>
+                            {safeStr(e.output) || (
+                              e.type === 'mcp'
+                                ? '(streaming SSE response — not captured in audit log)'
+                                : '(empty)'
+                            )}
+                          </div>
                         </div>
                       </div>
                     </TableCell>
@@ -282,7 +282,7 @@ function ViolationsCard({ violations }: { violations: TraceViolation[] }) {
             <TableCell style={MONO}>{v.turn ?? '—'}</TableCell>
             <TableCell style={MONO}>{v.index ?? '—'}</TableCell>
             <TableCell>{edgeStatusBadge(v.status)}</TableCell>
-            <TableCell style={{ fontSize: 12, color: 'var(--muted-raw)' }}>{v.details}</TableCell>
+            <TableCell style={{ fontSize: 12, color: 'var(--muted-raw)' }}>{safeStr(v.details)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -346,7 +346,7 @@ export default function TraceDetail() {
           </Button>
           <div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.3px' }}>
-              {data?.title ?? 'Trace'}
+              {safeStr(data?.title) || 'Trace'}
             </div>
             <div style={{ color: 'var(--muted-raw)', fontSize: 12, marginTop: 4, ...MONO }}>
               trace_id: {traceId}

@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_INPUT_TRUNCATE = 500
-_OUTPUT_TRUNCATE = 500
+_INPUT_TRUNCATE = 20000
+_OUTPUT_TRUNCATE = 20000
 _PROMPT_TRUNCATE = 500
 _FINAL_ANSWER_TRUNCATE = 1000
 

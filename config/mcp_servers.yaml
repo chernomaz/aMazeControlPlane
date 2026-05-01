@@ -11,12 +11,4 @@
 #           actual runtime tool list comes from the MCP's `tools/list`
 #           response on first contact.
 
-mcp_servers:
-  demo-mcp:
-    url: http://demo-mcp:8000/mcp/
-    tools:
-      - web_search
-      - dummy_email
-      - file_read
-      - pdf_search
-      - sql_query
+mcp_servers: {}

@@ -14,6 +14,8 @@ COPY examples/mcp_server/requirements.txt /mcp/requirements.txt
 RUN pip install --no-cache-dir -r /mcp/requirements.txt
 
 COPY examples/mcp_server/ /mcp/
+COPY scripts/amaze-mcp-register /usr/local/bin/amaze-mcp-register
+RUN chmod +x /mcp/entrypoint.sh
 
 # No SSL_CERT_FILE override — MCP tools reach the public internet
 # directly (e.g. api.tavily.com) and must trust real public CAs. The
@@ -25,4 +27,4 @@ ENV HOST=0.0.0.0 \
 
 EXPOSE 8000
 
-CMD ["python", "/mcp/server.py"]
+ENTRYPOINT ["/mcp/entrypoint.sh"]

@@ -89,13 +89,11 @@ def main() -> int:
                 pass
 
             if exc.code == 502:
+                # MCP server not ready yet — retry just like orchestrator-unavailable.
                 print(
-                    f"ERROR: orchestrator could not probe tools for '{name}' at {url}.\n"
-                    f"  Detail: {body_text}\n"
-                    f"  Check that the MCP server is reachable from the orchestrator container.",
+                    f"Attempt {attempt}/{retries}: MCP server not ready (probe 502): {body_text!r}",
                     file=sys.stderr,
                 )
-                return 1
 
             print(
                 f"Attempt {attempt}/{retries}: HTTP {exc.code}: {body_text!r}",

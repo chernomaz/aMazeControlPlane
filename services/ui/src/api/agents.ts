@@ -56,6 +56,12 @@ export interface SendMessageResponse {
   denial: SendMessageDenialAlert | null
 }
 
+export function removeAgent(agentId: string) {
+  return apiFetch<{ removed: string }>(`/agents/${encodeURIComponent(agentId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export function sendAgentMessage(agentId: string, prompt: string) {
   return apiFetch<SendMessageResponse>(
     `/agents/${encodeURIComponent(agentId)}/messages`,
