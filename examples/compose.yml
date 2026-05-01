@@ -125,3 +125,29 @@ services:
       # through the aMaze proxy. The proxy governs agent→MCP traffic;
       # the MCP server's own outbound calls are its operator's business.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+
+  # -- MCP auto-registration sidecar -----------------------------------------
+  # Calls POST /mcp_servers on the orchestrator as soon as demo-mcp is up.
+  # The orchestrator probes tools/list automatically (no tool names needed here).
+  # Exits 0 on success or if already registered (idempotent); removes itself.
+  demo-mcp-register:
+    image: python:3.12-slim
+    container_name: demo-mcp-register
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      demo-mcp:
+        condition: service_started
+      amaze:
+        condition: service_started
+    volumes:
+      - ../scripts:/scripts:ro
+    environment:
+      AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8001
+      AMAZE_MCP_NAME: demo-mcp
+      AMAZE_MCP_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8000/mcp
+      # Give demo-mcp and orchestrator extra time to finish startup
+      AMAZE_REGISTER_RETRIES: "20"
+      AMAZE_REGISTER_DELAY: "3"
+    command: python /scripts/amaze-mcp-register

@@ -221,42 +221,45 @@ export default function McpServers() {
                 </div>
               </div>
 
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: 'var(--muted-raw)',
-                  marginBottom: 8,
-                }}
-              >
-                Available Tools ({s.tools.length})
-                {!s.approved && ' — review before approving'}
+              <div style={{
+                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                letterSpacing: '0.5px', color: 'var(--muted-raw)', marginBottom: 8,
+              }}>
+                Available Tools ({s.tools.length}){!s.approved && ' — review before approving'}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {s.tools.length === 0 ? (
-                  <span style={{ color: 'var(--muted-raw)', fontSize: 12 }}>No tools listed.</span>
-                ) : (
-                  s.tools.map((tool) => (
-                    <span
-                      key={tool}
-                      style={{
-                        fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: 'var(--cyan)',
-                        background: 'rgba(67,209,198,.08)',
-                        border: '1px solid rgba(67,209,198,.25)',
-                        borderRadius: 999,
-                        padding: '3px 10px',
-                      }}
-                    >
-                      {tool}
-                    </span>
-                  ))
-                )}
-              </div>
+
+              {s.tools.length === 0 ? (
+                <span style={{ color: 'var(--muted-raw)', fontSize: 12 }}>No tools listed.</span>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', color: 'var(--muted-raw)', fontWeight: 600,
+                                   paddingBottom: 6, paddingRight: 16, width: '30%',
+                                   borderBottom: '1px solid var(--line)' }}>Tool</th>
+                      <th style={{ textAlign: 'left', color: 'var(--muted-raw)', fontWeight: 600,
+                                   paddingBottom: 6, borderBottom: '1px solid var(--line)' }}>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.tools.map((tool) => (
+                      <tr key={tool.name}>
+                        <td style={{ paddingTop: 7, paddingBottom: 7, paddingRight: 16,
+                                     fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                                     color: 'var(--cyan)', fontWeight: 600,
+                                     verticalAlign: 'top' }}>
+                          {tool.name}
+                        </td>
+                        <td style={{ paddingTop: 7, paddingBottom: 7,
+                                     color: tool.description ? 'var(--text)' : 'var(--muted-raw)',
+                                     verticalAlign: 'top', lineHeight: 1.45 }}>
+                          {tool.description ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )
         })}

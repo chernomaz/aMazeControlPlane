@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""amaze-mcp-register — register an MCP server with aMaze and trigger auto-probe.
+
+Usage (standalone):
+    AMAZE_ORCHESTRATOR_URL=http://localhost:8001 \
+    AMAZE_MCP_NAME=my-mcp \
+    AMAZE_MCP_URL=http://my-mcp-host:8000/mcp \
+    python scripts/amaze-mcp-register
+
+Usage (Docker sidecar — see examples/compose.yml):
+    Environment variables are set by compose; the script is bind-mounted
+    from the host via the `../scripts` volume.
+
+Environment variables:
+  AMAZE_ORCHESTRATOR_URL  Base URL of the aMaze orchestrator
+                          (e.g. http://host.docker.internal:8001)
+  AMAZE_MCP_NAME          Logical name for this MCP server (e.g. demo-mcp)
+  AMAZE_MCP_URL           URL the orchestrator uses to probe + reach the MCP server
+                          (e.g. http://host.docker.internal:8000/mcp)
+
+Optional:
+  AMAZE_REGISTER_RETRIES  Max registration attempts (default: 15)
+  AMAZE_REGISTER_DELAY    Seconds between retries (default: 3)
+
+Exit codes:
+  0  Registered successfully or already registered (idempotent)
+  1  Probe failed or could not reach orchestrator after all retries
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+
+def main() -> int:
+    orchestrator = os.environ.get("AMAZE_ORCHESTRATOR_URL", "").rstrip("/")
+    name = os.environ.get("AMAZE_MCP_NAME", "")
+    url = os.environ.get("AMAZE_MCP_URL", "")
+    retries = int(os.environ.get("AMAZE_REGISTER_RETRIES", "15"))
+    delay = float(os.environ.get("AMAZE_REGISTER_DELAY", "3"))
+
+    if not orchestrator:
+        print("ERROR: AMAZE_ORCHESTRATOR_URL is required", file=sys.stderr)
+        return 1
+    if not name:
+        print("ERROR: AMAZE_MCP_NAME is required", file=sys.stderr)
+        return 1
+    if not url:
+        print("ERROR: AMAZE_MCP_URL is required", file=sys.stderr)
+        return 1
+
+    endpoint = f"{orchestrator}/mcp_servers"
+    payload = json.dumps({"name": name, "url": url}).encode()
+
+    print(f"Registering '{name}' at {url} via {endpoint} …")
+
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read())
+                tools_count = len(body.get("tools", []))
+                tool_names = [t.get("name", "?") if isinstance(t, dict) else str(t)
+                              for t in body.get("tools", [])]
+                print(
+                    f"OK — '{name}' registered with {tools_count} tool(s): "
+                    f"{', '.join(tool_names) or '(none)'}"
+                )
+                return 0
+
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                print(f"'{name}' already registered — skipping (idempotent)")
+                return 0
+
+            body_text = ""
+            try:
+                body_text = exc.read().decode()
+            except Exception:
+                pass
+
+            if exc.code == 502:
+                print(
+                    f"ERROR: orchestrator could not probe tools for '{name}' at {url}.\n"
+                    f"  Detail: {body_text}\n"
+                    f"  Check that the MCP server is reachable from the orchestrator container.",
+                    file=sys.stderr,
+                )
+                return 1
+
+            print(
+                f"Attempt {attempt}/{retries}: HTTP {exc.code}: {body_text!r}",
+                file=sys.stderr,
+            )
+
+        except urllib.error.URLError as exc:
+            print(
+                f"Attempt {attempt}/{retries}: Cannot reach orchestrator at {endpoint}: {exc.reason}",
+                file=sys.stderr,
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            print(f"Attempt {attempt}/{retries}: {exc}", file=sys.stderr)
+
+        if attempt < retries:
+            print(f"  retrying in {delay:.0f}s …", file=sys.stderr)
+            time.sleep(delay)
+
+    print(
+        f"ERROR: failed to register '{name}' after {retries} attempts.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

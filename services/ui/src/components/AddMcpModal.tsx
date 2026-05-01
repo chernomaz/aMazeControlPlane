@@ -46,6 +46,8 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
     onError: (err: unknown) => {
       if (err instanceof ApiError && err.status === 409) {
         setError(`A server named "${name}" already exists.`)
+      } else if (err instanceof ApiError && err.status === 502) {
+        setError('Could not reach the server to probe tools. Check the URL and try again.')
       } else {
         const msg = err instanceof Error ? err.message : 'Failed to add server'
         setError(msg)
@@ -77,12 +79,12 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
       setError('URL must start with http:// or https://')
       return
     }
-    if (tools.length === 0) {
-      setError('At least one tool is required.')
-      return
-    }
 
-    mutation.mutate({ name: trimmedName, url: trimmedUrl, tools })
+    mutation.mutate({
+      name: trimmedName,
+      url: trimmedUrl,
+      tools: tools.length > 0 ? tools : undefined,
+    })
   }
 
   const handleOpenChange = (next: boolean) => {
@@ -102,7 +104,7 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
         <DialogHeader>
           <DialogTitle>Add MCP Server</DialogTitle>
           <DialogDescription style={{ color: 'var(--muted-raw)' }}>
-            Manually register an MCP server. The server starts in approved state.
+            Manually register an MCP server. Leave the Tools field blank to auto-probe available tools.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,11 +140,11 @@ export default function AddMcpModal({ open, onOpenChange, onToast }: AddMcpModal
               id="mcp-tools"
               value={toolsRaw}
               onChange={(e) => setToolsRaw(e.target.value)}
-              placeholder="web_search, fetch_url, summarize"
+              placeholder="web_search, fetch_url"
               rows={3}
             />
             <span style={{ fontSize: 11, color: 'var(--muted-raw)' }}>
-              Separate tool names with commas.
+              Leave blank to auto-probe tools from the server.
             </span>
           </div>
 

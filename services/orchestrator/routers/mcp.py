@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+
+from ..mcp_probe import ProbeError, probe_tools
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +51,19 @@ async def list_mcp_servers(request: Request) -> list[dict[str, Any]]:
             approved_flag = await r.get(f"mcp:{name}:approved")
             approved = approved_flag != "false"  # default approved
 
+            raw_tools = data.get("tools", [])
+            tools: list[dict] = []
+            for t in raw_tools:
+                if isinstance(t, str):
+                    tools.append({"name": t})
+                elif isinstance(t, dict):
+                    tools.append(t)
+                # else: skip malformed entries
+
             out.append({
                 "name": name,
                 "url": data.get("url", ""),
-                "tools": data.get("tools", []),
+                "tools": tools,
                 "approved": approved,
             })
     except Exception as e:  # noqa: BLE001
@@ -68,7 +79,7 @@ async def list_mcp_servers(request: Request) -> list[dict[str, Any]]:
 class McpRegisterIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(min_length=1)
-    tools: list[str]
+    tools: Optional[list[str]] = None  # None → auto-probe; list → manual override
 
     @field_validator("name")
     @classmethod
@@ -89,20 +100,22 @@ class McpRegisterIn(BaseModel):
             raise ValueError("url must be http(s)://host[:port][/path]")
         return v
 
-    @field_validator("tools")
-    @classmethod
-    def _tools_nonempty_strs(cls, v: list[str]) -> list[str]:
-        if not v:
-            raise ValueError("tools must be a non-empty list")
-        if not all(isinstance(t, str) and t.strip() for t in v):
-            raise ValueError("tools must be a list of non-empty strings")
-        return v
-
 
 @router.post("/mcp_servers", status_code=201)
 async def create_mcp_server(body: McpRegisterIn, request: Request) -> dict[str, Any]:
     r = request.app.state.redis
-    payload = json.dumps({"url": body.url, "tools": list(body.tools)})
+
+    # Resolve tool list — probe the server when none provided manually.
+    if body.tools is None:
+        try:
+            tool_objects: list[dict] = await probe_tools(body.url)
+        except ProbeError as e:
+            raise HTTPException(status_code=502, detail=f"mcp-probe-failed: {e}") from e
+    else:
+        # Manual override — wrap bare strings as minimal {name} objects.
+        tool_objects = [{"name": t} for t in body.tools]
+
+    payload = json.dumps({"url": body.url, "tools": tool_objects})
     try:
         # SET with NX → only create if absent. Then mark approved.
         ok = await r.set(f"mcp:{body.name}", payload, nx=True)
@@ -115,11 +128,11 @@ async def create_mcp_server(body: McpRegisterIn, request: Request) -> dict[str, 
         logger.error("mcp_servers: redis write failed for %s: %s", body.name, e)
         raise HTTPException(status_code=503, detail="redis-unavailable") from e
     logger.info("mcp_servers: registered name=%s url=%s tools=%d",
-                body.name, body.url, len(body.tools))
+                body.name, body.url, len(tool_objects))
     return {
         "name": body.name,
         "url": body.url,
-        "tools": list(body.tools),
+        "tools": tool_objects,
         "approved": True,
     }
 

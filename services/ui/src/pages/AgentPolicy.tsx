@@ -93,9 +93,9 @@ export default function AgentPolicy() {
     for (const s of mcpQ.data ?? []) {
       if (!s.approved) continue
       for (const t of s.tools) {
-        if (!seen.has(t)) {
-          seen.add(t)
-          list.push(t)
+        if (!seen.has(t.name)) {
+          seen.add(t.name)
+          list.push(t.name)
         }
       }
     }
