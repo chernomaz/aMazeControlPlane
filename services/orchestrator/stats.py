@@ -48,6 +48,7 @@ class KpiCard(TypedDict):
     avg_latency_ms: int | None    # mean LLM latency in range; None until tracked
     critical_alerts: int          # count of denied=true in range
     policy_health: str            # "ok" | "warn" | "fail"
+    total_tokens: int             # sum of all LLM token counts in range
 
 
 class TimePoint(TypedDict):
@@ -294,6 +295,7 @@ async def get_dashboard_data(agent_id: str, range_seconds: int) -> DashboardPayl
 
     # --- 1. Time-bucketed metrics (TS.RANGE) -------------------------------
     llm_samples = await _ts_range(r, f"ts:{agent_id}:llm_tokens", from_ms, to_ms)
+    total_tokens = int(sum(v for _, v in llm_samples))
     tool_samples = await _ts_range(r, f"ts:{agent_id}:tool_calls", from_ms, to_ms)
     a2a_samples = await _ts_range(r, f"ts:{agent_id}:a2a_calls", from_ms, to_ms)
 
@@ -378,6 +380,7 @@ async def get_dashboard_data(agent_id: str, range_seconds: int) -> DashboardPayl
         "avg_latency_ms": None,
         "critical_alerts": critical_alerts,
         "policy_health": _policy_health(critical_alerts),
+        "total_tokens": total_tokens,
     }
 
     return DashboardPayload(

@@ -38,33 +38,33 @@ def register(globals_dict: dict[str, Any]) -> None:
     _agent_handler = globals_dict.get("receive_message_from_agent")
 
 
-async def call_user_handler(message: str) -> str:
+async def call_user_handler(message: Any) -> Any:
     if _user_handler is None:
         raise HandlerMissing(
-            "define `receive_message_from_user(message: str) -> str` in your module"
+            "define `receive_message_from_user(message)` in your module"
         )
     return await _dispatch(_user_handler, message)
 
 
-async def call_agent_handler(caller_id: str, message: str) -> str:
+async def call_agent_handler(caller_id: str, message: Any) -> Any:
     if _agent_handler is None:
         raise HandlerMissing(
-            "define `receive_message_from_agent(agent: str, message: str) -> str` in your module"
+            "define `receive_message_from_agent(agent, message)` in your module"
         )
     return await _dispatch(_agent_handler, caller_id, message)
 
 
-async def _dispatch(fn: Callable[..., Any], *args: Any) -> str:
+async def _dispatch(fn: Callable[..., Any], *args: Any) -> Any:
     """Await coroutine handlers on the loop; run sync handlers in threadpool.
 
     Returning from a sync handler blocks a threadpool worker but not the
-    event loop, which is exactly the contract the SDK documents. Return
-    value is cast to str so misbehaving handlers that return non-str
-    don't take down the FastAPI response serialiser.
+    event loop, which is exactly the contract the SDK documents. Returns
+    the handler's value as-is; None is normalised to "" so callers don't
+    have to guard against it.
     """
     if asyncio.iscoroutinefunction(fn):
         result = await fn(*args)
     else:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, fn, *args)
-    return str(result) if result is not None else ""
+    return result if result is not None else ""

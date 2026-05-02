@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Component, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
@@ -20,6 +20,44 @@ import { GraphEditor, validateGraph } from '@/components/GraphEditor'
 
 // LLM providers known to the policy schema (services/proxy/policy.py).
 const LLM_PROVIDERS = ['openai', 'anthropic', 'gemini', 'mistral', 'cohere', 'custom'] as const
+
+class GraphErrorBoundary extends Component<
+  { children: ReactNode },
+  { caught: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { caught: null }
+  }
+  static getDerivedStateFromError(e: Error) {
+    return { caught: e }
+  }
+  render() {
+    if (this.state.caught) {
+      return (
+        <div
+          style={{
+            background: 'rgba(224,82,82,.08)',
+            border: '1px solid rgba(224,82,82,.3)',
+            borderRadius: 10,
+            padding: 14,
+            color: 'var(--red)',
+            fontSize: 13,
+          }}
+        >
+          Graph editor failed to render: {this.state.caught.message}
+          <button
+            onClick={() => this.setState({ caught: null })}
+            style={{ marginLeft: 12, fontSize: 12, color: 'var(--blue)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const RATE_WINDOW_RE = /^\d+[smh]$/
 
@@ -228,9 +266,12 @@ export default function AgentPolicy() {
   const setMode = (m: PolicyMode) => {
     if (m === draft.mode) return
     if (m === 'strict') {
-      // Provide an empty starter graph if none yet — the GraphEditor needs
-      // something to render and a single start node is the minimum.
-      const graph: Graph = draft.graph ?? { start_step: 1, steps: [] }
+      // Seed a single placeholder step so start_step references a real node
+      // and the graph canvas is never empty on first render.
+      const graph: Graph = draft.graph ?? {
+        start_step: 1,
+        steps: [{ step_id: 1, call_type: 'tool', callee_id: '', max_loops: 1, next_steps: [] }],
+      }
       update({ mode: 'strict', graph })
     } else {
       update({ mode: 'flexible' })
@@ -431,12 +472,14 @@ export default function AgentPolicy() {
       ) : (
         <Card title="Execution Graph" subtitle="Strict mode — every call must follow this ordered graph.">
           <div style={{ minHeight: 360 }}>
-            <GraphEditor
-              value={draft.graph ?? { start_step: 1, steps: [] }}
-              onChange={(g: Graph) => update({ graph: g })}
-              allowedTools={allTools}
-              allowedAgents={allAgents}
-            />
+            <GraphErrorBoundary>
+              <GraphEditor
+                value={draft.graph ?? { start_step: 1, steps: [{ step_id: 1, call_type: 'tool', callee_id: '', max_loops: 1, next_steps: [] }] }}
+                onChange={(g: Graph) => update({ graph: g })}
+                allowedTools={allTools}
+                allowedAgents={allAgents}
+              />
+            </GraphErrorBoundary>
           </div>
         </Card>
       )}

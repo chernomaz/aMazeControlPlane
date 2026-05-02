@@ -83,6 +83,97 @@ and rewrite policies. Pick one: CSRF token, same-origin gate via the
 
 ---
 
+## Post-S4 user-feedback items (2026-04-30 demo session)
+
+### S4-FB-1. "Add MCP Server" modal: URL hint for cross-host vs same-host
+`services/ui/src/components/AddMcpModal.tsx`. When users add an MCP server
+they have to know which URL string to register based on where the MCP runs
+relative to the platform's network namespace:
+
+| MCP runs on… | Correct URL |
+|---|---|
+| Same host as platform | `http://host.docker.internal:8000/mcp/` |
+| Different host (LAN)  | `http://<lan-ip>:8000/mcp/` |
+| Different host (DNS)  | `https://mcp.example.com/mcp/` |
+
+The S3 architecture decoupled MCP routing from Docker DNS (Redis is the
+source of truth), but the modal doesn't surface this. **Add an inline
+hint / tooltip / examples block under the URL field** explaining the three
+cases. Also worth a single-line "Avoid using Docker service names like
+`http://demo-mcp:8000` — those only work when the platform shares a Docker
+network with the MCP, which violates S3's cross-host invariant."
+
+### S4-FB-3. MCP self-registration mechanism
+Today MCP servers can't self-register the way agents can. Agents call
+`POST /register` from inside their SDK on startup; FastMCP / vanilla MCP
+servers are plain HTTP servers with no SDK and no knowledge of the
+orchestrator. Pre-S4 this was papered over by seeding
+`config/mcp_servers.yaml` at boot — but for any production / multi-host
+deployment, the operator is forced to either (a) edit YAML and restart,
+(b) `curl POST /mcp_servers`, or (c) click through the GUI modal.
+
+This is a UX gap: users expect "start the MCP container, see it in the
+GUI" the way agents work today.
+
+**Three implementation options, ordered by cost:**
+
+1. **Tiny CLI registration utility** — `amaze-mcp-register` (a 30-line
+   shell or python script) that does `POST /mcp_servers` from the MCP
+   container's entrypoint, parameterised by env vars
+   `AMAZE_ORCHESTRATOR_URL`, `AMAZE_MCP_NAME`, `AMAZE_MCP_URL`,
+   `AMAZE_MCP_TOOLS`. Operator drops a one-line `amaze-mcp-register &&
+   <existing-cmd>` into their MCP container's command. **Recommended
+   first cut** — zero coupling to FastMCP internals, trivial to reuse
+   across MCP runtimes (FastMCP, mcp-server-sdk, custom).
+
+2. **Sidecar container** in the same compose service that runs the
+   registration call once and exits, then a `depends_on` brings up the
+   MCP server. Cleaner separation but adds compose complexity; appropriate
+   for shops that prefer infra-only changes over container code edits.
+
+3. **Operator-side discovery service** that scans declared MCP endpoints
+   periodically and registers/de-registers as containers come and go.
+   Closest to the "auto-register" mental model but invasive — requires
+   the operator to declare endpoints somewhere anyway, just shifting the
+   problem.
+
+**Files to create (option 1):**
+- `scripts/amaze-mcp-register` (executable shell script using `curl`
+  with retries, or a small python/click CLI)
+- Optional: ship a `Dockerfile.mcp-base` overlay that bakes the script
+  into a base image FastMCP authors can `FROM`-extend
+
+**Why not bake into the proxy:** the proxy is a transparent in-line
+component; adding "discover MCP servers" is out of its threat model.
+Registration belongs to the operator's deploy automation, not the
+control-plane data path.
+
+### S4-FB-2. "Test connection" button on Add MCP / Add LLM modals
+`services/ui/src/components/{AddMcpModal,AddLlmModal}.tsx`. Today a bad
+URL silently lands in Redis (or `litellm.yaml`) and the first agent call
+fails with a generic error. Add a **Test** button next to the URL field
+that probes the target before saving:
+
+* MCP: POST a JSON-RPC `initialize` to the URL, accept 200/307/406 as
+  "reachable" (FastMCP returns 406 to non-MCP-shaped requests but it's
+  proof of life).
+* LLM: probe the LiteLLM provider (e.g. for openai, GET on
+  `<base_url>/models` with the env-var-derived key — but this requires
+  the secret to be present in the platform container's env, which it
+  isn't today; defer LLM testing until that's in place).
+
+Backend support: a thin `POST /probe` endpoint that takes `{kind, url}` and
+runs a single-request reachability check from the orchestrator's network
+namespace (which is the same namespace the proxy will use). Avoids
+exposing the user's browser to the MCP / LLM directly, and gives the
+correct answer for "is it reachable from where it matters?"
+
+The mock at `services/ui_mock/index.html:1077` already shows a disabled
+"Test Connection" button on the LLM table — finish that work end-to-end
+on both modals.
+
+---
+
 # Original Sprint 1/2 follow-ups (pre-S4)
 
 ## ✅ Resolved on 2026-04-27 (code-review pass)

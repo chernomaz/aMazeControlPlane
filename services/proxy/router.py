@@ -156,13 +156,21 @@ class Router:
             return None
 
     def _rewrite(self, flow: http.HTTPFlow, endpoint_url: str, context: str) -> None:
-        """Parse *endpoint_url* and overwrite flow.request.host + port."""
+        """Parse *endpoint_url* and overwrite flow.request.host, port, and path prefix."""
         try:
             host, port = _parse_endpoint(endpoint_url)
         except ValueError as exc:
             logger.error("cannot parse endpoint for %s: %s", context, exc)
             deny(flow, "internal-error", status=403)
             return
+
+        # Normalise trailing slash: if the request path is exactly canonical_path + "/"
+        # (nothing after), rewrite to canonical_path.  This prevents 307 redirects from
+        # servers like Starlette (redirect_slashes=True) and works regardless of where
+        # the upstream is hosted.
+        canonical_path = urlparse(endpoint_url).path.rstrip("/")
+        if canonical_path and flow.request.path == canonical_path + "/":
+            flow.request.path = canonical_path
 
         logger.debug(
             "router rewrite %s: %s → %s:%s",

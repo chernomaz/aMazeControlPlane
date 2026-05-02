@@ -10,32 +10,15 @@ import {
   type Agent,
 } from '@/api/agents'
 import { Button } from '@/components/ui/button'
-import { useQuery as useAuditQuery } from '@tanstack/react-query'
-import { apiFetch } from '@/api/client'
+import { getAgentStats, type StatsRange, type CategoryBucket } from '@/api/stats'
+import { listTraces, type TraceListItem } from '@/api/traces'
+import { DonutChart } from '@/components/DonutChart'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Toast { id: number; msg: string; kind: 'success' | 'error' }
 type Subtab = 'dashboard' | 'policy'
-type TimeRange = '1h' | '6h' | '24h' | '7d'
-
-// ── Audit log types ──────────────────────────────────────────────────────────
-
-interface AuditEntry {
-  trace_id: string | null
-  ts: string
-  kind: string
-  target: string
-  tool: string | null
-  denied: boolean
-  denial_reason: string | null
-  input: unknown
-  output: unknown
-}
-
-function listAudit(agentId: string) {
-  return apiFetch<AuditEntry[]>(`/agents/${encodeURIComponent(agentId)}/audit?limit=200`)
-}
+type TimeRange = '1h' | '24h' | '7d'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +38,7 @@ function modeBadge(mode?: string) {
 // ── Time picker ───────────────────────────────────────────────────────────────
 
 function TimePicker({ value, onChange }: { value: TimeRange; onChange: (t: TimeRange) => void }) {
-  const opts: TimeRange[] = ['1h', '6h', '24h', '7d']
+  const opts: TimeRange[] = ['1h', '24h', '7d']
   return (
     <div style={{ display: 'inline-flex', padding: 3, borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--line)' }}>
       {opts.map(t => (
@@ -161,77 +144,6 @@ function LineChart({ color, points, xLabels, yUnit = '' }: {
   )
 }
 
-// ── Horizontal bar chart (per-category counts) ────────────────────────────────
-
-function HBarChart({ bars, emptyMsg = 'No data' }: {
-  bars: { label: string; value: number; color: string }[]
-  emptyMsg?: string
-}) {
-  const max = Math.max(...bars.map(b => b.value), 1)
-  if (bars.length === 0) return <div style={{ color: 'var(--muted-raw)', fontSize: 11, padding: '8px 0' }}>{emptyMsg}</div>
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-      {bars.map((b, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 82, fontSize: 10, color: 'var(--muted-raw)', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}
-            title={b.label}>{b.label}</div>
-          <div style={{ flex: 1, background: 'var(--panel2)', borderRadius: 4, overflow: 'hidden', height: 14, border: '1px solid var(--line)' }}>
-            <div style={{ height: '100%', width: `${(b.value / max) * 100}%`, background: b.color, borderRadius: 3, minWidth: b.value > 0 ? 4 : 0, transition: 'width .3s' }} />
-          </div>
-          <div style={{ width: 24, fontSize: 10, fontWeight: 700, color: 'var(--text)', textAlign: 'right', flexShrink: 0 }}>{b.value}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── Histogram (vertical bars with bucket ranges) ──────────────────────────────
-
-function HistoChart({ buckets, color, total }: {
-  buckets: { label: string; count: number }[]
-  color: string
-  total: number
-}) {
-  const max = Math.max(...buckets.map(b => b.count), 1)
-  const plotH = 80
-  if (total === 0) return <div style={{ color: 'var(--muted-raw)', fontSize: 11, padding: '8px 0' }}>No data</div>
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {/* Bars */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: plotH, position: 'relative' }}>
-        {/* Y-axis ticks */}
-        {[0, 50, 100].map(pct => {
-          const y = plotH - (pct / 100) * plotH
-          return (
-            <div key={pct} style={{ position: 'absolute', left: 0, right: 0, top: y, borderTop: '1px dashed var(--line)', display: 'flex', alignItems: 'center' }}>
-              <span style={{ fontSize: 8, color: 'var(--muted-raw)', marginLeft: -2, lineHeight: 1, background: 'var(--panel)', paddingRight: 2 }}>{pct}%</span>
-            </div>
-          )
-        })}
-        {buckets.map((b, i) => {
-          const pct = total > 0 ? (b.count / total) * 100 : 0
-          const barH = (b.count / max) * (plotH - 4)
-          return (
-            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', zIndex: 1 }}>
-              {b.count > 0 && (
-                <span style={{ fontSize: 8, color: 'var(--muted-raw)', marginBottom: 2, lineHeight: 1 }}>{Math.round(pct)}%</span>
-              )}
-              <div style={{ width: '80%', background: color, borderRadius: '3px 3px 0 0', height: barH, minHeight: b.count > 0 ? 2 : 0, opacity: 0.85 }} />
-            </div>
-          )
-        })}
-      </div>
-      {/* X labels */}
-      <div style={{ display: 'flex', gap: 4 }}>
-        {buckets.map((b, i) => (
-          <div key={i} style={{ flex: 1, fontSize: 8, color: 'var(--muted-raw)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {b.label}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ── Pending detail ────────────────────────────────────────────────────────────
 
@@ -279,10 +191,18 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
   const [lastReply, setLastReply] = useState<string | null>(null)
   const [chartTab, setChartTab] = useState<'calls' | 'latency'>('calls')
 
-  const { data: auditEntries = [] } = useAuditQuery({
-    queryKey: ['audit', agent.agent_id],
-    queryFn: () => listAudit(agent.agent_id),
-    refetchInterval: 10_000,
+  const statsQ = useQuery({
+    queryKey: ['stats', agent.agent_id, timeRange],
+    queryFn: () => getAgentStats(agent.agent_id, timeRange as StatsRange),
+    enabled: subtab === 'dashboard',
+    refetchInterval: 5_000,
+  })
+
+  const tracesQ = useQuery({
+    queryKey: ['traces', { agent: agent.agent_id }],
+    queryFn: () => listTraces({ agent: agent.agent_id, limit: 5 }),
+    enabled: subtab === 'dashboard',
+    refetchInterval: 5_000,
   })
 
   const handleSend = async () => {
@@ -336,81 +256,35 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
     letterSpacing: '0.06em',
   })
 
-  // ── Derive stats from audit log ───────────────────────────────────────────
-  const toolCalls = auditEntries.filter(e => e.kind === 'mcp').length
-  const a2aCalls = auditEntries.filter(e => e.kind === 'a2a').length
-  const denials = auditEntries.filter(e => e.denied).length
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const stats = statsQ.data
+  const kpi = stats?.kpi
+  const recentTraces: TraceListItem[] = tracesQ.data?.traces ?? []
 
-  // Time-bucket audit entries for the line chart
-  const RANGE_SEC: Record<TimeRange, number> = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 }
-  const NUM_BUCKETS: Record<TimeRange, number> = { '1h': 12, '6h': 12, '24h': 24, '7d': 14 }
-  const rangeSeconds = RANGE_SEC[timeRange]
-  const numBuckets = NUM_BUCKETS[timeRange]
-  const bucketSec = rangeSeconds / numBuckets
-  const nowSec = Date.now() / 1000
-  const startSec = nowSec - rangeSeconds
+  const callsPoints = (stats?.calls_over_time ?? []).map(p => p.value)
+  const latencyPoints = (stats?.latency_per_call ?? []).map(p => p.value)
+  const linePoints = chartTab === 'calls' ? callsPoints : latencyPoints
+  const lineXLabels = (chartTab === 'calls' ? stats?.calls_over_time : stats?.latency_per_call ?? [])
+    ?.map(p => {
+      const d = new Date(p.ts * 1000)
+      return timeRange === '7d'
+        ? d.toLocaleDateString('en', { weekday: 'short' })
+        : d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })
+    }) ?? []
 
-  const callBuckets = Array(numBuckets).fill(0)
-  auditEntries.forEach(e => {
-    const ts = Number(e.ts)
-    if (ts < startSec || ts > nowSec) return
-    const idx = Math.min(Math.floor((ts - startSec) / bucketSec), numBuckets - 1)
-    callBuckets[idx]++
-  })
+  const safeBuckets = (items: CategoryBucket[] | undefined): CategoryBucket[] =>
+    (items ?? []).filter(b => Number.isFinite(b.count) && b.count > 0)
 
-  const xLabels = Array.from({ length: numBuckets }, (_, i) => {
-    const t = startSec + i * bucketSec
-    const d = new Date(t * 1000)
-    if (timeRange === '7d') return d.toLocaleDateString('en', { weekday: 'short' })
-    return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })
-  })
+  const tokenSegs = safeBuckets(stats?.tokens)
+  const toolSegs = safeBuckets(stats?.tools)
+  const a2aSegs = safeBuckets(stats?.a2a)
+  const alertSegs = safeBuckets(stats?.alerts)
 
-  // Token histogram — parse from LLM output JSON
-  const TOKEN_BUCKETS = [
-    { label: '<100', min: 0, max: 100 },
-    { label: '100–300', min: 100, max: 300 },
-    { label: '300–1k', min: 300, max: 1000 },
-    { label: '1k–3k', min: 1000, max: 3000 },
-    { label: '3k+', min: 3000, max: Infinity },
-  ]
-  const llmEntries = auditEntries.filter(e => e.kind === 'llm')
-  const tokenCounts = llmEntries.map(e => {
-    try {
-      const out = typeof e.output === 'string' ? JSON.parse(e.output) : (e.output as Record<string, unknown>)
-      return (out as Record<string, Record<string, number>>)?.usage?.total_tokens ?? 0
-    } catch { return 0 }
-  }).filter(t => t > 0)
-  const tokenHistoBuckets = TOKEN_BUCKETS.map(b => ({
-    label: b.label,
-    count: tokenCounts.filter(t => t >= b.min && t < b.max).length,
-  }))
-
-  // Tool calls per tool name
-  const toolCountMap: Record<string, number> = {}
-  auditEntries.filter(e => e.kind === 'mcp' && e.tool).forEach(e => {
-    toolCountMap[e.tool!] = (toolCountMap[e.tool!] || 0) + 1
-  })
-  const toolBars = Object.entries(toolCountMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, value]) => ({ label, value, color: '#43d1c6' }))
-
-  // A2A calls per target
-  const a2aMap: Record<string, number> = {}
-  auditEntries.filter(e => e.kind === 'a2a').forEach(e => {
-    a2aMap[e.target] = (a2aMap[e.target] || 0) + 1
-  })
-  const a2aBars = Object.entries(a2aMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, value]) => ({ label, value, color: '#a97cff' }))
-
-  // Alerts per denial reason
-  const denialMap: Record<string, number> = {}
-  auditEntries.filter(e => e.denied && e.denial_reason).forEach(e => {
-    denialMap[e.denial_reason!] = (denialMap[e.denial_reason!] || 0) + 1
-  })
-  const denialBars = Object.entries(denialMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, value]) => ({ label, value, color: '#e05252' }))
+  const formatLatency = (ms: number | null | undefined): string => {
+    if (ms == null || !Number.isFinite(ms)) return '—'
+    if (ms < 1000) return `${Math.round(ms)} ms`
+    return `${(ms / 1000).toFixed(2)} s`
+  }
 
   return (
     <div>
@@ -492,66 +366,104 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
 
           {/* 2. KPI cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 14 }}>
-            <KpiCard label="Avg Latency" value="—" foot="no data yet" color="var(--cyan)" />
-            <KpiCard label="Tool Calls" value={String(toolCalls)} foot={`in last ${timeRange}`} color="var(--green)" />
-            <KpiCard label="Tokens Used" value="—" foot="budget: —" color="var(--yellow)" />
+            <KpiCard
+              label="Avg Latency"
+              value={formatLatency(kpi?.avg_latency_ms)}
+              foot={kpi ? `p95: —` : 'no data yet'}
+              color="var(--cyan)"
+            />
+            <KpiCard
+              label="Tool Calls"
+              value={toolSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
+              foot={`across ${(stats?.tools ?? []).length} tools`}
+              color="var(--green)"
+            />
+            <KpiCard
+              label="Tokens Used"
+              value={kpi?.total_tokens != null && kpi.total_tokens > 0
+                ? kpi.total_tokens.toLocaleString()
+                : '—'}
+              foot="budget: —"
+              color="var(--yellow)"
+            />
             <KpiCard
               label="Alerts"
-              value={String(denials)}
+              value={alertSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
               foot="↑ click to drill →"
               color="var(--red)"
               onClick={() => navigate(`/alerts?agent=${encodeURIComponent(agent.agent_id)}`)}
             />
           </div>
 
-          {/* 3. Line chart — Calls Over Time */}
+          {/* 3. Line chart — Calls Over Time | Latency per Call */}
           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '14px 16px', marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--line)', marginBottom: -1 }}>
                 <button style={chartTabStyle('calls')} onClick={() => setChartTab('calls')}>Calls Over Time</button>
-                <button style={chartTabStyle('latency')} onClick={() => setChartTab('latency')}>Calls by Kind</button>
+                <button style={chartTabStyle('latency')} onClick={() => setChartTab('latency')}>Latency per Call</button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted-raw)' }}>last {timeRange}</div>
             </div>
-            {chartTab === 'calls' ? (
-              <LineChart color="#5da9ff" points={callBuckets} xLabels={xLabels} yUnit="" />
-            ) : (
-              /* Calls by Kind — stacked indicator as horizontal bars */
-              <div style={{ padding: '12px 0' }}>
-                <HBarChart bars={[
-                  { label: 'llm', value: auditEntries.filter(e => e.kind === 'llm').length, color: '#5da9ff' },
-                  { label: 'mcp', value: toolCalls, color: '#43d1c6' },
-                  { label: 'a2a', value: a2aCalls, color: '#a97cff' },
-                  { label: 'unknown', value: auditEntries.filter(e => e.kind === 'unknown').length, color: '#9fb0d1' },
-                ].filter(b => b.value > 0)} emptyMsg="No calls in range" />
-              </div>
-            )}
+            <LineChart
+              color={chartTab === 'latency' ? '#43d1c6' : '#5da9ff'}
+              points={linePoints}
+              xLabels={lineXLabels}
+              yUnit={chartTab === 'latency' ? ' ms' : ''}
+            />
           </div>
 
-          {/* 4. Bucket charts */}
+          {/* 4. Donut charts */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 14 }}>
-            {/* Tokens / Call — histogram */}
             <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Tokens / Call</div>
-              <HistoChart buckets={tokenHistoBuckets} color="#f2b94b" total={tokenCounts.length} />
+              <DonutChart
+                segments={tokenSegs}
+                size={140}
+                thickness={20}
+                legend="right"
+                centerLabel={tokenSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
+                centerSubLabel="tokens"
+              />
             </div>
-            {/* Tool Calls — per tool */}
             <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Tool Calls</div>
-              <HBarChart bars={toolBars.slice(0, 5)} emptyMsg="No tool calls" />
+              <DonutChart
+                segments={toolSegs}
+                size={140}
+                thickness={20}
+                legend="right"
+                centerLabel={toolSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
+                centerSubLabel="calls"
+                onSegmentClick={s => navigate(`/traces?agent=${encodeURIComponent(agent.agent_id)}&tool=${encodeURIComponent(s.label)}`)}
+              />
             </div>
-            {/* Agent → Agent — per target */}
             <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Agent → Agent</div>
-              <HBarChart bars={a2aBars.slice(0, 5)} emptyMsg="No A2A calls" />
+              <DonutChart
+                segments={a2aSegs}
+                size={140}
+                thickness={20}
+                legend="right"
+                centerLabel={a2aSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
+                centerSubLabel="A2A"
+              />
             </div>
-            {/* Alerts — per denial reason */}
-            <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12, cursor: 'pointer' }}
-              onClick={() => navigate(`/alerts?agent=${encodeURIComponent(agent.agent_id)}`)}>
+            <div
+              style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 12, cursor: 'pointer' }}
+              onClick={() => navigate(`/alerts?agent=${encodeURIComponent(agent.agent_id)}`)}
+            >
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-                Alerts <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--muted-raw)' }}>— click →</span>
+                Alerts <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>— click to drill</span>
               </div>
-              <HBarChart bars={denialBars.slice(0, 5)} emptyMsg="No violations" />
+              <DonutChart
+                segments={alertSegs}
+                size={140}
+                thickness={20}
+                legend="right"
+                centerLabel={alertSegs.reduce((s, b) => s + b.count, 0).toLocaleString()}
+                centerSubLabel="alerts"
+                onSegmentClick={s => navigate(`/alerts?agent=${encodeURIComponent(agent.agent_id)}&reason=${encodeURIComponent(s.label)}`)}
+              />
             </div>
           </div>
 
@@ -567,38 +479,52 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
               <thead>
                 <tr style={{ color: 'var(--muted-raw)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                   <th style={{ textAlign: 'left', padding: '4px 8px 8px 0' }}>Trace ID</th>
-                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Time</th>
-                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Kind</th>
-                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Target</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Started</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Duration</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>LLM</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Tools</th>
+                  <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Tokens</th>
                   <th style={{ textAlign: 'left', padding: '4px 8px 8px' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {auditEntries.length === 0 ? (
-                  <tr><td colSpan={5} style={{ color: 'var(--muted-raw)', padding: '12px 0', textAlign: 'center' }}>No traces yet</td></tr>
+                {recentTraces.length === 0 ? (
+                  <tr><td colSpan={7} style={{ color: 'var(--muted-raw)', padding: '12px 0', textAlign: 'center' }}>No traces yet</td></tr>
                 ) : (
-                  auditEntries.slice(0, 5).map((e, i) => (
-                    <tr
-                      key={i}
-                      onClick={() => e.trace_id && navigate(`/traces/${encodeURIComponent(e.trace_id)}`)}
-                      style={{ cursor: e.trace_id ? 'pointer' : undefined, borderTop: '1px solid var(--line)' }}
-                    >
-                      <td style={{ padding: '8px 8px 8px 0', fontFamily: 'JetBrains Mono, ui-monospace, monospace', color: e.denied ? 'var(--red)' : 'var(--blue)' }}>
-                        {e.trace_id ? e.trace_id.slice(0, 8) : '—'}
-                      </td>
-                      <td style={{ padding: '8px', color: 'var(--muted-raw)' }}>{new Date(Number(e.ts) * 1000).toLocaleTimeString()}</td>
-                      <td style={{ padding: '8px', fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>{e.kind}</td>
-                      <td style={{ padding: '8px', fontFamily: 'JetBrains Mono, ui-monospace, monospace', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {e.tool ?? e.target}
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        {e.denied
-                          ? <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: 'rgba(224,82,82,.15)', color: 'var(--red)', border: '1px solid rgba(224,82,82,.3)' }}>violation</span>
-                          : <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: 'rgba(31,191,117,.12)', color: 'var(--green)', border: '1px solid rgba(31,191,117,.3)' }}>passed</span>
-                        }
-                      </td>
-                    </tr>
-                  ))
+                  recentTraces.map(t => {
+                    const startedMs = typeof t.started_at === 'number'
+                      ? (t.started_at < 1e12 ? t.started_at * 1000 : t.started_at)
+                      : Date.parse(String(t.started_at))
+                    const idColor = t.status === 'failed' ? 'var(--red)' : t.violations > 0 ? 'var(--yellow)' : 'var(--blue)'
+                    const durMs = t.duration_ms
+                    const durStr = durMs < 1000 ? `${durMs} ms` : `${(durMs / 1000).toFixed(2)} s`
+                    return (
+                      <tr
+                        key={t.trace_id}
+                        onClick={() => navigate(`/traces/${encodeURIComponent(t.trace_id)}`)}
+                        style={{ cursor: 'pointer', borderTop: '1px solid var(--line)' }}
+                      >
+                        <td style={{ padding: '8px 8px 8px 0', fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 12, color: idColor }}>
+                          {t.trace_id.slice(0, 8)}
+                        </td>
+                        <td style={{ padding: '8px', fontSize: 12, color: 'var(--muted-raw)' }}>
+                          {Number.isFinite(startedMs) ? new Date(startedMs).toLocaleTimeString() : '—'}
+                        </td>
+                        <td style={{ padding: '8px', fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 12 }}>{durStr}</td>
+                        <td style={{ padding: '8px' }}>{t.llm_calls}</td>
+                        <td style={{ padding: '8px' }}>{t.tool_calls}</td>
+                        <td style={{ padding: '8px' }}>{t.total_tokens.toLocaleString()}</td>
+                        <td style={{ padding: '8px' }}>
+                          {t.status === 'failed'
+                            ? <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: 'rgba(224,82,82,.15)', color: 'var(--red)', border: '1px solid rgba(224,82,82,.3)' }}>failed</span>
+                            : t.violations > 0
+                            ? <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: 'rgba(242,185,75,.12)', color: 'var(--yellow)', border: '1px solid rgba(242,185,75,.3)' }}>violation</span>
+                            : <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: 'rgba(31,191,117,.12)', color: 'var(--green)', border: '1px solid rgba(31,191,117,.3)' }}>passed</span>
+                          }
+                        </td>
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>

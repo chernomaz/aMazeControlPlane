@@ -207,7 +207,7 @@ function EdgesTable({
                       {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </span>
                   </TableCell>
-                  <TableCell style={MONO}>{e.index}</TableCell>
+                  <TableCell style={MONO}>{i}</TableCell>
                   <TableCell style={{ ...MONO, fontSize: 11, color: 'var(--muted-raw)' }}>
                     {formatTs(e.ts)}
                   </TableCell>

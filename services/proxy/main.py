@@ -81,6 +81,18 @@ class FailClosed:
             )
             deny(flow, "internal-error", status=403)
 
+    async def responseheaders(self, flow: http.HTTPFlow) -> None:
+        method = getattr(self._inner, "responseheaders", None)
+        if method is None:
+            return
+        try:
+            await method(flow)
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "addon %s raised on responseheaders\n%s",
+                self._name, traceback.format_exc(),
+            )
+
     async def response(self, flow: http.HTTPFlow) -> None:
         method = getattr(self._inner, "response", None)
         if method is None:

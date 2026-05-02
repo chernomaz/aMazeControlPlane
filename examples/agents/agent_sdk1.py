@@ -8,6 +8,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ.pop("LANGSMITH_API_KEY", None)
 
 import asyncio
+from typing import Any
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -65,7 +66,7 @@ async def _build_agent():
     return _agent
 
 
-async def receive_message_from_user(q: str) -> str:
+async def receive_message_from_user(q: Any) -> Any:
     _log(f"user message: {q!r}")
     agent = await _build_agent()
     try:
@@ -88,7 +89,7 @@ async def receive_message_from_user(q: str) -> str:
 # wouldn't work because the SDK calls this handler with TWO args
 # (caller_id, message) while receive_message_from_user takes one. Wrap
 # so we accept the caller id and just drop it.
-async def receive_message_from_agent(caller: str, q: str) -> str:
+async def receive_message_from_agent(caller: str, q: Any) -> Any:
     _log(f"A2A from {caller}: {q!r}")
     return await receive_message_from_user(q)
 

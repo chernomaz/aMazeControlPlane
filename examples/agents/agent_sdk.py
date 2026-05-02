@@ -8,6 +8,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ.pop("LANGSMITH_API_KEY", None)
 
 import asyncio
+from typing import Any
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -66,7 +67,7 @@ def _log(msg: str) -> None:
     print(f"[agent-sdk] {msg}", flush=True)
 
 
-async def receive_message_from_user(q: str) -> str:
+async def receive_message_from_user(q: Any) -> Any:
     _log(f"user message: {q!r}")
     agent = await _build_agent()
     try:

@@ -251,10 +251,14 @@ async def list_traces(
 ) -> tuple[list[TraceSummary], str | None]:
     """Group records by `trace_id`, return one summary per trace, newest-first.
 
-    Walks the stream backwards in chunks until `limit` distinct trace_ids are
-    accumulated (or the stream is exhausted). `next_cursor` = an id strictly
-    smaller than the oldest stream_id walked, or `None` if the stream is
-    exhausted.
+    Always scans `audit:global` so that peer-agent denials (e.g. agent-sdk2
+    denying a tool call during an A2A hop initiated by agent-sdk) are included
+    in the violation count and the trace status. Per-agent streams only hold
+    records from that agent, so they miss peer denials on the same trace_id.
+
+    When `agent_id` is provided only traces that have at least one record
+    belonging to that agent are returned, but ALL records for those traces
+    (including peer records) are used for the summary metrics.
 
     `denied_only=True` includes only traces that contain at least one denied
     record. Filtering happens after grouping so a trace with one denial is
@@ -263,7 +267,6 @@ async def list_traces(
     if limit <= 0:
         return [], None
 
-    key = _stream_key(agent_id)
     r = await redis_client()
 
     if cursor is None or cursor == "-":
@@ -271,19 +274,20 @@ async def list_traces(
     else:
         max_id = cursor
 
-    # trace_id -> records, in encounter order (newest-first, since
-    # xrevrange walks backwards).
+    # trace_id -> all records (any agent), newest-first encounter order.
     grouped: dict[str, list[AuditRecord]] = {}
-    order: list[str] = []
+    # trace_ids confirmed to have ≥1 record from the requested agent.
+    owned: set[str] = set()
+    order: list[str] = []  # owned trace_ids in encounter order
     last_seen: str | None = None
     chunk = max(limit * 8, 100)
     exhausted = False
 
     while len(order) < limit:
         try:
-            entries = await r.xrevrange(key, max=max_id, min="-", count=chunk)
+            entries = await r.xrevrange("audit:global", max=max_id, min="-", count=chunk)
         except redis.ResponseError as exc:
-            logger.debug("list_traces: xrevrange %s failed: %s", key, exc)
+            logger.debug("list_traces: xrevrange audit:global failed: %s", exc)
             exhausted = True
             break
 
@@ -299,16 +303,17 @@ async def list_traces(
             last_seen = rec["_stream_id"]
             tid = rec.get("trace_id", "")
             if not tid:
-                # Untraced records can't be grouped — skip them.
                 continue
+
             if tid not in grouped:
-                if len(order) >= limit:
-                    # Already at limit; stop adding new traces but let the
-                    # loop drain the chunk so last_seen advances honestly.
-                    continue
                 grouped[tid] = []
-                order.append(tid)
             grouped[tid].append(rec)
+
+            rec_agent = rec.get("agent_id", "")
+            if tid not in owned and (agent_id is None or rec_agent == agent_id):
+                owned.add(tid)
+                if len(order) < limit:
+                    order.append(tid)
 
         if len(entries) < chunk:
             exhausted = True
@@ -321,7 +326,7 @@ async def list_traces(
 
     summaries: list[TraceSummary] = []
     for tid in order:
-        summary = _summarize_trace(tid, grouped[tid])
+        summary = _summarize_trace(tid, grouped[tid], primary_agent_id=agent_id)
         if denied_only and summary["violations"] == 0:
             continue
         summaries.append(summary)
@@ -333,11 +338,15 @@ async def list_traces(
     return summaries, next_cursor
 
 
-def _summarize_trace(trace_id: str, records: list[AuditRecord]) -> TraceSummary:
+def _summarize_trace(
+    trace_id: str,
+    records: list[AuditRecord],
+    primary_agent_id: str | None = None,
+) -> TraceSummary:
     """Project a list of AuditRecords (one trace) into a TraceSummary."""
-    # agent_id: first non-empty wins. Records in a single trace should all
-    # share an agent in practice, but be defensive.
-    agent_id = ""
+    # Use the provided primary agent_id when available (caller knows which
+    # agent owns this trace). Fall back to first non-empty agent_id seen.
+    agent_id = primary_agent_id or ""
     timestamps: list[float] = []
     llm_calls = tool_calls = a2a_calls = 0
     total_tokens = 0

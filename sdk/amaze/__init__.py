@@ -2,19 +2,23 @@
 
 Public surface:
 
-    # Send to another agent through the NEMO control plane.
-    reply: str = amaze.send_message_to_agent("target-agent", "hello")
+    # Send to another agent through the aMaze control plane.
+    # message and reply can be a str, dict, list, int, float, bool, or None —
+    # any JSON-serializable value. Strings are the common case and work
+    # exactly as before; structured types are encoded transparently on the wire.
+    reply = amaze.send_message_to_agent("target-agent", "hello")
+    reply = amaze.send_message_to_agent("target-agent", {"action": "search", "q": "..."})
 
     # Define one or both handlers in your module, then call init().
-    def receive_message_from_user(message: str) -> str:
+    def receive_message_from_user(message):
         return f"you said: {message}"
 
-    def receive_message_from_agent(agent: str, message: str) -> str:
+    def receive_message_from_agent(agent, message):
         return f"from {agent}: {message}"
 
     amaze.init()          # blocks; runs the A2A + chat servers
     # ... or for an async-first agent:
-    async def receive_message_from_user(message: str) -> str:
+    async def receive_message_from_user(message):
         return await agent.ainvoke(message)
 
 `init()` resolves both handlers in the caller's own module globals — the
@@ -67,8 +71,12 @@ def init(agent_id: str | None = None, *, block: bool = True) -> None:
     _a2a.start_server(block=block)
 
 
-def send_message_to_agent(target: str, message: str) -> str:
-    """Send `message` to `target` (an agent_id) and return the text reply.
+def send_message_to_agent(target: str, message: Any) -> Any:
+    """Send `message` to `target` (an agent_id) and return the reply.
+
+    `message` can be any JSON-serializable value: str, dict, list, int,
+    float, bool, or None. The reply has the same range of types — whatever
+    the receiving agent's handler returns.
 
     Blocking — safe to call from sync handlers. Raises `SendError` on
     policy denies, partner errors, or missing bearer.

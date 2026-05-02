@@ -8,6 +8,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ.pop("LANGSMITH_API_KEY", None)
 
 import asyncio
+from typing import Any
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -80,7 +81,7 @@ async def _run_llm(task: str) -> str:
         return f"Error: {e}"
 
 
-async def receive_message_from_user(q: str) -> str:
+async def receive_message_from_user(q: Any) -> Any:
     # agent-sdk2 is designed as a cascade target, not a user-facing endpoint.
     # We still honour direct /chat requests by running the same dispatcher
     # logic — useful for isolation testing (`curl http://localhost:<port>/chat`).
@@ -88,12 +89,12 @@ async def receive_message_from_user(q: str) -> str:
     return await _dispatch(q)
 
 
-async def receive_message_from_agent(caller: str, q: str) -> str:
+async def receive_message_from_agent(caller: str, q: Any) -> Any:
     _log(f"A2A message from {caller}: {q!r}")
     return await _dispatch(q)
 
 
-async def _dispatch(q: str) -> str:
+async def _dispatch(q: Any) -> Any:
     """Decide which tool to trigger based on the incoming text, then run the LLM.
 
     - `weather` anywhere in the message → ask the LLM to fetch current

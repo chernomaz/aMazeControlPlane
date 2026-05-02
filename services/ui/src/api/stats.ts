@@ -12,6 +12,7 @@ export interface DashboardKpi {
   avg_latency_ms: number | null
   critical_alerts: number
   policy_health: PolicyHealth
+  total_tokens: number
 }
 
 export interface TimeSeriesPoint {

@@ -279,6 +279,12 @@ function GraphEditorInner({
     { ok: true } | { ok: false; errors: string[] } | null
   >(null)
 
+  // Keep a ref so the effect below doesn't need onChange as a dependency.
+  // Without this, every parent re-render creates a new onChange reference,
+  // which re-fires the effect and causes an infinite setState loop (#185).
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange })
+
   // Push changes upstream whenever the graph mutates.
   const skipFirst = useRef(true)
   useEffect(() => {
@@ -286,8 +292,9 @@ function GraphEditorInner({
       skipFirst.current = false
       return
     }
-    onChange(flowToGraph(nodes, edges))
-  }, [nodes, edges, onChange])
+    onChangeRef.current(flowToGraph(nodes, edges))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges])
 
   // Mark current start in node data so the badge renders correctly.
   // We pick the smallest step_id with no incoming edge.
@@ -581,9 +588,9 @@ function NodeConfigPanel({
 
         <div className="space-y-1">
           <Label className="text-xs text-amaze-muted">callee_id</Label>
-          {calleeOptions.length > 0 ? (
+          {calleeOptions.length > 0 && d.callee_id ? (
             <Select
-              value={d.callee_id || ''}
+              value={d.callee_id}
               onValueChange={(v) => onUpdate({ callee_id: v })}
             >
               <SelectTrigger className="h-7 text-xs">

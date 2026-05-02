@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import threading
 from http import HTTPStatus
 from typing import Any, Callable
@@ -38,7 +39,7 @@ class SendError(RuntimeError):
         super().__init__(f"send failed: status={status_code} reason={reason}")
 
 
-def send_sync(target: str, message: str) -> str:
+def send_sync(target: str, message: Any) -> Any:
     """Blocking send — safe from sync handlers AND async handlers.
 
     When called from inside a running event loop we can't use
@@ -58,7 +59,32 @@ def send_sync(target: str, message: str) -> str:
         return pool.submit(lambda: asyncio.run(send_async(target, message))).result()
 
 
-async def send_async(target: str, message: str) -> str:
+def _encode_part(value: Any) -> dict:
+    """Encode a Python value as an A2A message part.
+
+    Strings use `type=text` (backward-compatible). Any other JSON-serializable
+    value uses `type=json` with the value JSON-encoded in the `text` field.
+    """
+    if isinstance(value, str):
+        return {"type": "text", "text": value}
+    return {"type": "json", "text": json.dumps(value)}
+
+
+def _decode_part(part: dict) -> Any:
+    """Decode an A2A message part back to a Python value.
+
+    `type=json` parts are JSON-decoded; anything else is returned as a string.
+    """
+    if part.get("type") == "json":
+        raw = part.get("text", "")
+        try:
+            return json.loads(raw) if raw else None
+        except (ValueError, TypeError):
+            return raw
+    return part.get("text", "") or ""
+
+
+async def send_async(target: str, message: Any) -> Any:
     """Async send — used by async handlers; `send_sync` wraps it in asyncio.run."""
     c = _core.cfg()
     url = f"http://{target}:{c.a2a_port}/"
@@ -69,10 +95,9 @@ async def send_async(target: str, message: str) -> str:
         "params": {
             "id": "task-sdk-1",
             # Intentionally no `from` field — the receiver reads caller
-            # identity from the ext_proc-injected `x-amaze-caller`
-            # header. Adding `from` here would be ignored but also
-            # misleading: readers might assume the receiver trusts it.
-            "message": {"role": "user", "parts": [{"type": "text", "text": message}]},
+            # identity from the proxy-injected `x-amaze-caller` header.
+            # Adding `from` here would be ignored but also misleading.
+            "message": {"role": "user", "parts": [_encode_part(message)]},
         },
     }
     headers = {"Content-Type": "application/json"}
@@ -89,7 +114,7 @@ async def send_async(target: str, message: str) -> str:
     async with httpx.AsyncClient(timeout=30, proxy=c.proxy_url) as client:
         resp = await client.post(url, json=payload, headers=headers)
 
-    # Structured deny bodies from ext_proc:  {"error":"denied","reason":"..."}
+    # Structured deny bodies from the proxy:  {"error":"denied","reason":"..."}
     try:
         body = resp.json()
     except ValueError:
@@ -101,9 +126,7 @@ async def send_async(target: str, message: str) -> str:
             reason = body.get("reason") or body.get("error")
         raise SendError(resp.status_code, reason, body)
 
-    # Unwrap the A2A JSON-RPC envelope. We only surface text back to the
-    # caller — the artifact structure is A2A-spec plumbing that the SDK
-    # author should not have to know about.
+    # Unwrap the A2A JSON-RPC envelope.
     if not isinstance(body, dict):
         raise SendError(200, "malformed-response", body)
     if "error" in body:
@@ -114,7 +137,7 @@ async def send_async(target: str, message: str) -> str:
     if artifacts:
         parts = artifacts[0].get("parts") or []
         if parts:
-            return parts[0].get("text", "") or ""
+            return _decode_part(parts[0])
     return ""
 
 
@@ -249,7 +272,7 @@ def _a2a_app(ready: threading.Event) -> FastAPI:
         params = body.get("params") or {}
         message = params.get("message") or {}
         parts = message.get("parts") or []
-        text = parts[0].get("text", "") if parts else ""
+        text = _decode_part(parts[0]) if parts else ""
         # Read caller id ONLY from the ext_proc-injected header. `params.from`
         # is sender-controllable and would be spoofable — ignored by design.
         # Distinguish "absent" (request bypassed ext_proc; config failure)
@@ -300,7 +323,7 @@ def _a2a_app(ready: threading.Event) -> FastAPI:
                     "id": params.get("id", rpc_id),
                     "status": {"state": "completed"},
                     "artifacts": [
-                        {"parts": [{"type": "text", "text": reply}]}
+                        {"parts": [_encode_part(reply)]}
                     ],
                 },
             }

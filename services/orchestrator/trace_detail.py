@@ -179,6 +179,50 @@ def _classify_violation_kind(denial_reason: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# A2A record reordering
+# ---------------------------------------------------------------------------
+
+
+def _reorder_a2a_records(records: list[AuditRecord]) -> list[AuditRecord]:
+    """Move each A2A record to just before the first record from its target agent.
+
+    A2A audit records are emitted on the proxy's *response* hook — after the
+    upstream (peer) agent has already processed and replied.  In the global
+    stream they therefore appear AFTER the peer's own records, which makes the
+    sequence diagram show the A2A arrow after the peer's internal calls.
+
+    We fix this by scanning the list and, for each A2A record, finding the
+    first record from the target agent that precedes it in the list; if found,
+    the A2A record is moved to that position.
+    """
+    result = list(records)
+    i = 0
+    while i < len(result):
+        r = result[i]
+        if r.get("kind") != "a2a":
+            i += 1
+            continue
+        target = r.get("target", "")
+        if not target:
+            i += 1
+            continue
+        # Find the earliest record from the target agent that currently sits
+        # before position i (i.e. appears earlier in the stream).
+        target_first: int | None = None
+        for j in range(i):
+            if result[j].get("agent_id") == target:
+                target_first = j
+                break
+        if target_first is not None:
+            rec = result.pop(i)
+            result.insert(target_first, rec)
+            # Don't advance i — the slot now holds what was at i+1.
+        else:
+            i += 1
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main assembly
 # ---------------------------------------------------------------------------
 
@@ -195,9 +239,15 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
     if not records:
         return None
 
-    # ----- primary agent: most common agent_id across the records ----------
+    # ----- primary agent: agent_id with the most records --------------------
     agent_counts = Counter(r.get("agent_id", "") for r in records if r.get("agent_id"))
     agent_id = agent_counts.most_common(1)[0][0] if agent_counts else ""
+
+    # ----- reorder: move each A2A record just before the first record from
+    # its target agent.  A2A records are written on the response hook (after
+    # the upstream agent has already run), so in the global stream they appear
+    # AFTER the peer's records.  Reordering restores causal call order.
+    records = _reorder_a2a_records(records)
 
     # ----- timing ----------------------------------------------------------
     timestamps = [_ts(r) for r in records]
@@ -286,6 +336,30 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
         for name, count in tool_counter.most_common()
     ]
 
+    # ----- pre-pass: locate where to inject A2A return arrows ---------------
+    # An A2A audit record represents the full round-trip (request + response)
+    # in one entry.  To make the sequence diagram legible, we inject a
+    # synthetic "reply" step pointing back from the peer to the caller,
+    # placed just after the peer's last record.
+    #
+    # inject_return_after[record_index] = (peer_agent, caller_agent, a2a_ts)
+    # inject_return_after[record_index] = (peer_agent, caller_agent, a2a_ts, a2a_output)
+    inject_return_after: dict[int, tuple[str, str, float, str]] = {}
+    for idx, r in enumerate(records):
+        if r.get("kind") != "a2a":
+            continue
+        target = r.get("target", "")
+        caller = r.get("agent_id", "") or agent_id
+        if not target:
+            continue
+        last_idx: int | None = None
+        for j in range(idx + 1, len(records)):
+            if records[j].get("agent_id") == target:
+                last_idx = j
+        inject_return_after[last_idx if last_idx is not None else idx] = (
+            target, caller, _ts(r), _truncate(r.get("output", ""), _OUTPUT_TRUNCATE)
+        )
+
     # ----- sequence_steps + edges (single pass) ----------------------------
     # `turn` increments each time we see an LLM record whose request had a
     # role=user message AND no role=tool/function messages (i.e. a fresh
@@ -297,7 +371,36 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
 
     turn = 0
     index_within_turn = 0
-    last_to = "user"
+    # Initialise last_to to the primary agent so the first LLM call's arrow
+    # originates from the agent lane, not the user lane.  A synthetic
+    # "user → agent" step is prepended below to anchor the user lane.
+    last_to = agent_id or "user"
+
+    # Synthetic step + edge: user → primary agent (the conversation entry point).
+    if agent_id:
+        sequence_steps.append({
+            "from": "user",
+            "to": agent_id,
+            "label": "message",
+            "status": "real",
+        })
+        edges.append({
+            "turn": 0,
+            "index": 0,
+            "ts": started_at,
+            "type": "init",
+            "name": agent_id,
+            "indirect": False,
+            "source": "user",
+            "model": None,
+            "duration_ms": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "status": "ok",
+            "input": "",
+            "output": "",
+        })
 
     for i, r in enumerate(records):
         kind = r.get("kind", "")
@@ -349,7 +452,12 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
             to_node = r.get("target", "") or "?"
             label = to_node
 
-        from_node = "user" if i == 0 else last_to
+        # A2A calls originate from the calling agent, not from the LLM lane.
+        # All other calls originate from wherever last_to left off.
+        if kind == "a2a":
+            from_node = r.get("agent_id", "") or last_to
+        else:
+            from_node = last_to
         step_status = "failed" if denied else "real"
         sequence_steps.append({
             "from": from_node,
@@ -389,14 +497,13 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
         else:
             edge_status = "ok"
 
-        # source: the conventional caller. For the first record we treat
-        # the user as the originator; afterwards the agent is. We don't
-        # have request/response correlation in the audit stream, so
-        # duration_ms is best-effort 0.
-        if i == 0:
-            edge_source = "user"
-        elif kind == "llm":
+        # source: semantic label for who triggered this call.
+        # LLM calls are made by the agent; MCP calls are directed by the LLM;
+        # A2A calls are made by the specific calling agent (not just "llm").
+        if kind == "llm":
             edge_source = "agent"
+        elif kind == "a2a":
+            edge_source = r.get("agent_id", "") or "agent"
         else:
             edge_source = "llm"
 
@@ -415,7 +522,8 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
             "total_tokens": tot_tok,
             "status": edge_status,
             "input": _truncate(r.get("input", ""), _INPUT_TRUNCATE),
-            "output": _truncate(r.get("output", ""), _OUTPUT_TRUNCATE),
+            # A2A forward edge: output is shown on the paired a2a-return edge instead.
+            "output": "" if kind == "a2a" else _truncate(r.get("output", ""), _OUTPUT_TRUNCATE),
         })
 
         # ---- violation row (denied, OR alerted-mode pass-with-alert) ----
@@ -444,6 +552,34 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
                 "status": "blocked" if denied else "alerted",
                 "details": alert_obj if isinstance(alert_obj, dict) else {},
             })
+
+        # ---- synthetic A2A return arrow (injected after peer's last record) --
+        if i in inject_return_after:
+            peer, caller, a2a_ts, a2a_output = inject_return_after[i]
+            sequence_steps.append({
+                "from": peer,
+                "to": caller,
+                "label": "reply",
+                "status": "real",
+            })
+            edges.append({
+                "turn": turn,
+                "index": index_within_turn + 1,
+                "ts": a2a_ts,
+                "type": "a2a-return",
+                "name": caller,
+                "indirect": False,
+                "source": peer,
+                "model": None,
+                "duration_ms": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "status": "ok",
+                "input": "",
+                "output": a2a_output,
+            })
+            last_to = caller  # caller is back in control after the reply
 
     # ----- finalize --------------------------------------------------------
     return {
