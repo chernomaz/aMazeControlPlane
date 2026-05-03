@@ -152,12 +152,16 @@ autossh -M 0 -N \
     -o "ServerAliveInterval 30" \
     -o "ServerAliveCountMax 3" \
     -o "ExitOnForwardFailure yes" \
-    -i /path/to/aws-key.pem \
     -R 0.0.0.0:9005:localhost:9005 \
     -R 0.0.0.0:9006:localhost:9006 \
     -R 0.0.0.0:8002:localhost:8002 \
-    ubuntu@<public-ip>
+    -R 0.0.0.0:8091:localhost:8091 \
+    ubuntu@<public-ip> &
 ```
+
+> **Note:** If your SSH key is not in the default `~/.ssh/` location, add
+> `-i /path/to/key.pem` to the command. SSH automatically uses keys found in
+> `~/.ssh/id_rsa`, `~/.ssh/id_ed25519`, etc.
 
 **Verify the tunnel is working** (run on public machine):
 
@@ -173,31 +177,42 @@ Port mapping summary:
 
 | Local port | Tunneled to public machine port | Purpose |
 |------------|-------------------------------|---------|
-| 9005 | 51.20.64.153:9005 | Agent A — A2A |
-| 9006 | 51.20.64.153:9006 | Agent B — A2A |
-| 8002 | 51.20.64.153:8002 | MCP server |
+| 9005 | \<public-ip\>:9005 | Agent A — A2A |
+| 9006 | \<public-ip\>:9006 | Agent B — A2A |
+| 8091 | \<public-ip\>:8091 | Agent A — user chat (UI → agent) |
+| 8002 | \<public-ip\>:8002 | MCP server |
 
-Add more `-R` lines for additional agents or MCP servers.
+Add more `-R` lines for each additional agent A2A port, chat port, or MCP server.
+
+> **Chat port:** Only the agent that receives messages directly from the UI
+> needs a chat port tunneled. A2A-only agents (called by other agents, not
+> by users) only need their A2A port.
 
 ---
 
 ## Part 4 — Proxy CA Certificate (automatic)
 
-The aMaze SDK fetches the mitmproxy CA certificate automatically from
-`GET /ca.pem` on the orchestrator when the agent starts. No manual step
-needed for remote agents.
+The aMaze SDK fetches the mitmproxy CA certificate automatically. No manual
+step needed for remote agents.
 
-The SDK installs the cert before any HTTPS traffic is made:
+The fetch happens at **SDK import time** — before any `httpx` or OpenAI client
+is constructed — so `llm = ChatOpenAI(...)` at module level works without
+crashing:
+
 ```
-Agent starts → SDK calls GET <orchestrator>/ca.pem
-            → writes cert to /tmp/amaze-ca-*.pem
-            → sets SSL_CERT_FILE + REQUESTS_CA_BUNDLE
-            → registers with orchestrator (now trusts the proxy)
+import amaze
+  → SDK checks: is SSL_CERT_FILE set but the file missing?
+  → yes (remote agent, no volume mount)
+  → fetches GET <AMAZE_ORCHESTRATOR_URL>/ca.pem immediately
+  → writes cert to /tmp/amaze-ca-*.pem
+  → sets SSL_CERT_FILE + REQUESTS_CA_BUNDLE
+
+llm = ChatOpenAI(...)     ← cert already in place, no crash
+amaze.init(...)           ← registers with orchestrator
 ```
 
-Co-resident agents (same machine as platform) continue to use the Docker
-volume mount as before — the SDK skips the fetch if `SSL_CERT_FILE` is
-already set.
+Co-resident agents (same machine as platform) have the cert on disk via the
+Docker volume mount — the SDK detects the file exists and skips the fetch.
 
 ---
 
@@ -285,19 +300,49 @@ files automatically — no Dockerfile changes needed for new agents.
 
 ### 6.2 MCP URL in agent code
 
-Agents on the local machine connect to MCP servers **through the proxy** on
-the public machine. Use the public machine IP and tunneled port:
+Agents must refer to MCP servers by their **registered name** as the URL
+hostname — **not** by IP address or port.
 
 ```python
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 client = MultiServerMCPClient({
     "tools": {
-        "url": "http://<public-ip>:8002/mcp/",   # tunneled MCP
+        "url": "http://my-mcp/mcp/",   # ← registered name, NOT the IP
         "transport": "streamable_http",
     }
 })
 ```
+
+**Why the registered name and not `http://<public-ip>:8002/mcp/`?**
+
+All agent traffic goes through the aMaze proxy (mitmproxy). When the proxy
+intercepts an outbound request it needs to know:
+
+1. Is this an MCP call or something else?
+2. Which MCP server is being called?
+3. What policy applies to this agent + server combination?
+4. Where is the real MCP server URL?
+
+The proxy answers all four questions by looking up the hostname in Redis:
+
+```
+Agent sends:  GET http://my-mcp/mcp/tools/list
+Proxy sees hostname "my-mcp"
+Proxy looks up: mcp:my-mcp:url → http://host.docker.internal:8002/mcp
+                mcp:my-mcp:tools → [...]
+Proxy enforces: is "my-mcp" in agent's allowed_tools policy?
+Proxy rewrites URL and forwards to real server.
+```
+
+If the agent used `http://51.20.64.153:8002/mcp/` instead, the proxy would
+see the raw IP, find no matching MCP registration in Redis, and **block the
+request** — it cannot identify which server it is or apply the right policy.
+
+The registered name acts as a stable logical identifier that works regardless
+of where the MCP server is physically running (local machine, remote, cloud).
+The proxy resolves the real address at call time from the Redis entry created
+during MCP registration.
 
 ---
 
@@ -384,38 +429,50 @@ Replace `<public-ip>` with your actual public machine IP (e.g. `51.20.64.153`).
 
 ## Part 8 — Configure Policies
 
-On the **public machine**, edit `config/policies.yaml`:
-
-```yaml
-policies:
-  agent-a:
-    mode: flexible
-    max_tokens_per_turn: 10000
-    max_tool_calls_per_turn: 20
-    max_agent_calls_per_turn: 5
-    allowed_llm_providers: [openai]
-    allowed_tools: [tool_a, tool_b]    # exact tool names from your MCP server
-    allowed_agents: [agent-b]          # agents this agent may call via A2A
-    on_violation: block
-    on_budget_exceeded: block
-
-  agent-b:
-    mode: flexible
-    max_tokens_per_turn: 10000
-    max_tool_calls_per_turn: 20
-    max_agent_calls_per_turn: 5
-    allowed_llm_providers: [openai]
-    allowed_tools: [tool_a, tool_b]
-    allowed_agents: []
-    on_violation: block
-    on_budget_exceeded: block
-```
-
-Restart the platform to reload policies:
+Policies are stored in **Redis** and applied immediately — no restart needed.
+Push them via the orchestrator API on the **public machine**:
 
 ```bash
-docker compose -f docker/docker-compose.yml restart amaze
+curl -X PUT http://<public-ip>:8001/policy/agent-a \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "agent-a",
+    "mode": "flexible",
+    "max_tokens_per_turn": 10000,
+    "max_tool_calls_per_turn": 20,
+    "max_agent_calls_per_turn": 5,
+    "allowed_llm_providers": ["openai"],
+    "allowed_tools": ["tool_a", "tool_b"],
+    "allowed_agents": ["agent-b"],
+    "on_violation": "block",
+    "on_budget_exceeded": "block"
+  }'
+
+curl -X PUT http://<public-ip>:8001/policy/agent-b \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "agent-b",
+    "mode": "flexible",
+    "max_tokens_per_turn": 10000,
+    "max_tool_calls_per_turn": 20,
+    "max_agent_calls_per_turn": 0,
+    "allowed_llm_providers": ["openai"],
+    "allowed_tools": ["tool_a", "tool_b"],
+    "allowed_agents": [],
+    "on_violation": "block",
+    "on_budget_exceeded": "block"
+  }'
 ```
+
+Verify:
+```bash
+curl http://<public-ip>:8001/policy/agent-a | python3 -m json.tool
+```
+
+You can also set policies through the UI: **Agents** tab → select agent → **Policy**.
+
+> `config/policies.yaml` is legacy. It is no longer read at runtime — use the
+> API or UI instead.
 
 ---
 
