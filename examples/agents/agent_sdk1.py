@@ -1,8 +1,4 @@
 import os
-
-# Disable LangSmith tracing BEFORE any langchain import — inside a NEMO
-# container the tracer tries to POST to api.smith.langchain.com over HTTPS,
-# which tunnels through Envoy as CONNECT and hangs the agent.
 import asyncio
 from typing import Any
 
@@ -12,7 +8,6 @@ load_dotenv()
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langsmith import tracing_context
 
 import amaze
 
@@ -27,16 +22,12 @@ llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
-# Same lazy-build pattern as agent_sdk.py — the MCP handshake can't
-# happen at module-import time because policy hasn't been pushed yet.
+# Built once by on_startup hook after registration completes.
 _agent = None
-_agent_lock = asyncio.Lock()
 
 
 async def _build_agent():
     global _agent
-    if _agent is not None:
-        return _agent
     _log("building LangChain agent (loading MCP tools)")
     client = MultiServerMCPClient(
         {
@@ -59,14 +50,15 @@ async def _build_agent():
             "Always cite sources."
         ),
     )
-    return _agent
+    _log("agent ready")
 
 
 async def receive_message_from_user(q: Any) -> Any:
     _log(f"user message: {q!r}")
-    agent = await _build_agent()
+    if _agent is None:
+        return "Agent not ready — please retry in a moment"
     try:
-        result = await agent.ainvoke(
+        result = await _agent.ainvoke(
             {"messages": [{"role": "user", "content": q}]}
         )
         content = str(result["messages"][-1].content)
@@ -77,14 +69,6 @@ async def receive_message_from_user(q: Any) -> Any:
         return f"Error: {e}"
 
 
-# Inbound A2A from another agent is handled exactly like a user message:
-# run the LLM on it and return the content as the A2A reply. This makes
-# agent-sdk1 the terminal hop — it doesn't forward anywhere further.
-#
-# A direct alias `receive_message_from_agent = receive_message_from_user`
-# wouldn't work because the SDK calls this handler with TWO args
-# (caller_id, message) while receive_message_from_user takes one. Wrap
-# so we accept the caller id and just drop it.
 async def receive_message_from_agent(caller: str, q: Any) -> Any:
     _log(f"A2A from {caller}: {q!r}")
     return await receive_message_from_user(q)

@@ -1,8 +1,4 @@
 import os
-
-# Disable LangSmith tracing BEFORE any langchain import — inside a NEMO
-# container the tracer tries to POST to api.smith.langchain.com over HTTPS,
-# which tunnels through Envoy as CONNECT and hangs the agent.
 import asyncio
 from typing import Any
 
@@ -12,7 +8,6 @@ load_dotenv()
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langsmith import tracing_context
 
 import amaze
 
@@ -27,16 +22,12 @@ llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
-# Lazy-build: policy isn't pushed at module-import time, so the MCP
-# handshake would fail. First inbound call (from agent-sdk via A2A)
-# triggers the build; subsequent calls reuse the cached agent.
+# Built once by on_startup hook after registration completes.
 _agent = None
 
 
 async def _build_agent():
     global _agent
-    if _agent is not None:
-        return _agent
     _log("building LangChain agent (loading MCP tools)")
     client = MultiServerMCPClient(
         {
@@ -58,16 +49,16 @@ async def _build_agent():
             "Return a concise, factual answer with the result."
         ),
     )
-    return _agent
+    _log("agent ready")
 
 
 async def _run_llm(task: str) -> str:
-    agent = await _build_agent()
+    if _agent is None:
+        return "Agent not ready — please retry in a moment"
     try:
-        with tracing_context(enabled=False):
-            result = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": task}]}
-            )
+        result = await _agent.ainvoke(
+            {"messages": [{"role": "user", "content": task}]}
+        )
         content = str(result["messages"][-1].content)
         _log(f"LLM returned (len={len(content)}): {content[:200]!r}")
         return content
@@ -77,9 +68,6 @@ async def _run_llm(task: str) -> str:
 
 
 async def receive_message_from_user(q: Any) -> Any:
-    # agent-sdk2 is designed as a cascade target, not a user-facing endpoint.
-    # We still honour direct /chat requests by running the same dispatcher
-    # logic — useful for isolation testing (`curl http://localhost:<port>/chat`).
     _log(f"user message: {q!r}")
     return await _dispatch(q)
 
@@ -90,14 +78,7 @@ async def receive_message_from_agent(caller: str, q: Any) -> Any:
 
 
 async def _dispatch(q: Any) -> Any:
-    """Decide which tool to trigger based on the incoming text, then run the LLM.
-
-    - `weather` anywhere in the message → ask the LLM to fetch current
-      weather for London via web_search.
-    - anything else → ask the LLM to read alice's mailbox via dummy_email
-      and return the content.
-    """
-    lower = q.lower()
+    lower = str(q).lower()
     if "weather" in lower:
         task = (
             "Use web_search to find the current weather in London, UK. "

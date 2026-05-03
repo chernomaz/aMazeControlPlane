@@ -1,8 +1,4 @@
 import os
-
-# Disable LangSmith tracing BEFORE any langchain import — inside a NEMO
-# container the tracer tries to POST to api.smith.langchain.com over HTTPS,
-# which tunnels through Envoy as CONNECT and hangs the agent.
 import asyncio
 from typing import Any
 
@@ -12,7 +8,6 @@ load_dotenv()
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langsmith import tracing_context
 
 import amaze
 
@@ -22,18 +17,17 @@ llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
-# MCP tool discovery (tools/list, initialize) is now allowed by the proxy
-# even before a policy is pushed — it is read-only metadata with no side
-# effects. The agent can therefore be built eagerly at startup rather than
-# lazily on the first message. _agent is set once by amaze.init() via the
-# startup hook and is read-only thereafter (no lock needed).
+# Built once by on_startup hook after registration completes.
+# Handlers use _agent directly — no lazy build, no lock.
 _agent = None
+
+
+def _log(msg: str) -> None:
+    print(f"[agent-sdk] {msg}", flush=True)
 
 
 async def _build_agent():
     global _agent
-    if _agent is not None:
-        return _agent
     client = MultiServerMCPClient(
         {
             "tools": {
@@ -53,27 +47,17 @@ async def _build_agent():
             "Always cite sources."
         ),
     )
-    return _agent
-
-
-def _log(msg: str) -> None:
-    # print + flush is enough — Docker captures stdout. Using a plain
-    # print keeps the log format tight and avoids fighting uvicorn's
-    # logging configuration.
-    print(f"[agent-sdk] {msg}", flush=True)
+    _log(f"agent ready — {len(tools)} tool(s) loaded")
 
 
 async def receive_message_from_user(q: Any) -> Any:
     _log(f"user message: {q!r}")
-    agent = await _build_agent()
+    if _agent is None:
+        return "Agent not ready — please retry in a moment"
     try:
-        # tracing_context(enabled=False) defensively disables tracing even
-        # inside the block — the env vars at the top of the file should be
-        # enough, but the belt-and-suspenders costs one word.
-        with tracing_context(enabled=False):
-            result = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": q}]}
-            )
+        result = await _agent.ainvoke(
+            {"messages": [{"role": "user", "content": q}]}
+        )
         content = result["messages"][-1].content
     except Exception as e:
         _log(f"LLM call failed: {e}")
@@ -81,22 +65,9 @@ async def receive_message_from_user(q: Any) -> Any:
 
     _log(f"LLM returned (len={len(str(content))}): {str(content)[:160]!r}")
 
-    # Content-based routing:
-    #   'bitcoin' anywhere in the LLM output → forward to agent-sdk1
-    #   anything else                         → forward to agent-sdk2
-    #
-    # Case-insensitive match; the LLM might phrase the topic as
-    # "Bitcoin", "BITCOIN", "bitcoin price", etc.
-    if "bitcoin" in str(content).lower():
-        target = "agent-sdk1"
-    else:
-        target = "agent-sdk2"
+    target = "agent-sdk1" if "bitcoin" in str(content).lower() else "agent-sdk2"
     _log(f"routing to {target}")
 
-    # amaze.send_message_to_agent is sync but safe to call from an async
-    # handler — internally it forks a one-shot thread when there's a
-    # running event loop. For a tight hot path, use asyncio.to_thread to
-    # offload to the default pool; here a per-call thread is fine.
     try:
         reply = amaze.send_message_to_agent(target, content)
     except amaze.SendError as e:
