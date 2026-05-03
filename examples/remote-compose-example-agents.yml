@@ -1,0 +1,52 @@
+name: amaze-remote
+
+services:
+
+  profile-agent:
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: profile_agent
+    container_name: profile-agent
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      HTTP_PROXY:   http://${AMAZE_PROXY_HOST}:8080
+      HTTPS_PROXY:  http://${AMAZE_PROXY_HOST}:8080
+      NO_PROXY:     ${AMAZE_PROXY_HOST}
+      AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST}:8001
+      AMAZE_PROXY_URL:        http://${AMAZE_PROXY_HOST}:8080
+      AMAZE_AGENT_ID:   profile-agent
+      AMAZE_A2A_HOST:   ${AMAZE_PROXY_HOST}
+      AMAZE_A2A_PORT:   "9005"
+      AMAZE_CHAT_HOST:  ${AMAZE_PROXY_HOST}
+      AMAZE_CHAT_PORT:  "8091"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    ports:
+      - "8091:8091"
+      - "9005:9005"
+
+  support-agent:
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: support_agent
+    container_name: support-agent
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      HTTP_PROXY:   http://${AMAZE_PROXY_HOST}:8080
+      HTTPS_PROXY:  http://${AMAZE_PROXY_HOST}:8080
+      NO_PROXY:     ${AMAZE_PROXY_HOST}
+      AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST}:8001
+      AMAZE_PROXY_URL:        http://${AMAZE_PROXY_HOST}:8080
+      AMAZE_AGENT_ID:   support-agent
+      AMAZE_A2A_HOST:   ${AMAZE_PROXY_HOST}
+      AMAZE_A2A_PORT:   "9006"
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    ports:
+      - "9006:9006"

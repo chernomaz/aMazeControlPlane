@@ -57,8 +57,9 @@ async def receive_message_from_agent(caller: str, q: Any) -> Any:
     if _agent is None:
         return "Agent not ready — please retry in a moment"
     try:
+         
         result = await _agent.ainvoke(
-            {"messages": [{"role": "user", "content": q}]}
+            {"messages": [{"role": "user", "content": f"Agent 1 returned this customer summary:\n{q}\n\nChoose support action.",}]}
         )
         content = str(result["messages"][-1].content)
         _log(f"LLM returned: {content[:160]!r}")

@@ -1,0 +1,19 @@
+name: amaze-agents
+
+services:
+  new-mcp-server:
+    build:
+      context: ..                      # ← repo root, not examples/
+      dockerfile: examples/new_mcp_server/Dockerfile
+    container_name: new-mcp-server
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8002"
+      AMAZE_ORCHESTRATOR_URL: http://${AMAZE_PROXY_HOST}:8001
+      AMAZE_MCP_NAME: new-mcp
+      AMAZE_MCP_URL: http://host.docker.internal:8002/mcp #if you create the tunnel -if not just http:///[ip]:8002/mcp
+      AMAZE_REGISTER_RETRIES: "20"
+      AMAZE_REGISTER_DELAY: "3"

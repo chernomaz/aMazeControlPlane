@@ -1,0 +1,22 @@
+# Dependencies for the demo MCP server (examples/mcp_server/server.py +
+# tools/*). Baked into the MCP container image at build time.
+
+# --- MCP framework ---
+fastmcp>=2.0
+langchain-core>=0.3,<1
+
+# --- tool plumbing used by the bundled tools/ ---
+python-dotenv>=1.0,<2
+httpx>=0.27,<1
+langsmith>=0.1
+
+# --- per-tool deps ---
+# websearch.py  → Tavily API client
+tavily-python>=0.5
+# sql_tool.py   → MySQL connector
+mysql-connector-python>=9.0
+# pdf_tool.py   → PDF loader + splitter + embeddings/store
+pypdf>=5.0
+langchain-community>=0.3,<1
+langchain-text-splitters>=0.3,<1
+langchain-chroma>=0.1
