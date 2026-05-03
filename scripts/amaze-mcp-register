@@ -79,8 +79,41 @@ def main() -> int:
 
         except urllib.error.HTTPError as exc:
             if exc.code == 409:
-                print(f"'{name}' already registered — skipping (idempotent)")
-                return 0
+                # Already registered — call /refresh to update the tool list
+                # in case the server restarted with different tools.
+                print(f"'{name}' already registered — refreshing tool list …")
+                refresh_url = f"{orchestrator}/mcp_servers/{name}/refresh"
+                try:
+                    req2 = urllib.request.Request(
+                        refresh_url,
+                        data=b"",
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req2, timeout=10) as resp2:
+                        body2 = json.loads(resp2.read())
+                        tool_names = [t.get("name", "?") if isinstance(t, dict) else str(t)
+                                      for t in body2.get("tools", [])]
+                        print(
+                            f"OK — '{name}' refreshed with {len(tool_names)} tool(s): "
+                            f"{', '.join(tool_names) or '(none)'}"
+                        )
+                        return 0
+                except urllib.error.HTTPError as ref_exc:
+                    ref_body = ""
+                    try:
+                        ref_body = ref_exc.read().decode()
+                    except Exception:
+                        pass
+                    print(
+                        f"Attempt {attempt}/{retries}: refresh failed ({ref_exc.code}): {ref_body!r}",
+                        file=sys.stderr,
+                    )
+                except Exception as ref_exc:  # noqa: BLE001
+                    print(
+                        f"Attempt {attempt}/{retries}: refresh error: {ref_exc}",
+                        file=sys.stderr,
+                    )
 
             body_text = ""
             try:

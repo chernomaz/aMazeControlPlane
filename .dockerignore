@@ -1,0 +1,27 @@
+# Node modules — reinstalled fresh inside each container
+services/ui/node_modules/
+services/ui/dist/
+
+# Python cache — not needed in any image
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+
+# Git history — not needed in images
+.git/
+.gitignore
+
+# Local env files — never bake secrets into images
+.env
+**/*.env
+**/*.env.local
+
+# IDE / editor artifacts
+.vscode/
+.idea/
+**/.DS_Store
+
+# Test output
+tests/results/

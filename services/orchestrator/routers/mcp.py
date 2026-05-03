@@ -161,3 +161,41 @@ async def approve_mcp_server(name: str, request: Request) -> dict[str, Any]:
 @router.post("/mcp_servers/{name}/reject")
 async def reject_mcp_server(name: str, request: Request) -> dict[str, Any]:
     return await _set_mcp_approved(request, name, False)
+
+
+@router.post("/mcp_servers/{name}/refresh")
+async def refresh_mcp_server(name: str, request: Request) -> dict[str, Any]:
+    """Re-probe the MCP server and update its tool list in Redis.
+
+    Called automatically by amaze-mcp-register when the server restarts
+    and gets a 409 (already registered). Preserves the existing approval
+    state — does NOT reset approved to true.
+    """
+    r = request.app.state.redis
+    try:
+        raw = await r.get(f"mcp:{name}")
+        if not raw:
+            raise HTTPException(status_code=404, detail="mcp-not-found")
+        data = json.loads(raw)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error("mcp_servers refresh: redis read failed for %s: %s", name, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+
+    try:
+        tool_objects = await probe_tools(data["url"])
+    except ProbeError as e:
+        raise HTTPException(status_code=502, detail=f"mcp-probe-failed: {e}") from e
+
+    payload = json.dumps({"url": data["url"], "tools": tool_objects})
+    try:
+        await r.set(f"mcp:{name}", payload)
+    except Exception as e:  # noqa: BLE001
+        logger.error("mcp_servers refresh: redis write failed for %s: %s", name, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+
+    approved_flag = await r.get(f"mcp:{name}:approved")
+    approved = approved_flag != "false"
+    logger.info("mcp_servers: refreshed name=%s tools=%d", name, len(tool_objects))
+    return {"name": name, "url": data["url"], "tools": tool_objects, "approved": approved}
