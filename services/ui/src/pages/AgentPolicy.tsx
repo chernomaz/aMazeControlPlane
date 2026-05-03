@@ -479,6 +479,7 @@ export default function AgentPolicy() {
                 allowedTools={allTools}
                 allowedAgents={allAgents}
                 allowedLlmProviders={draft.allowed_llm_providers}
+                agentId={agentId}
               />
             </GraphErrorBoundary>
           </div>

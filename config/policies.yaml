@@ -1,1 +1,13 @@
+# Policies are stored in Redis and managed via the orchestrator API:
+#
+#   PUT  /policy/{agent_id}   — create or update a policy
+#   GET  /policy/{agent_id}   — read current policy
+#
+# This file is legacy bootstrap — it is no longer read at runtime.
+# Use the UI (Agents → Policy tab) or the API directly:
+#
+#   curl -X PUT http://<orchestrator>:8001/policy/<agent-id> \
+#     -H "Content-Type: application/json" \
+#     -d '{"name":"my-agent","mode":"flexible",...}'
+
 policies: {}

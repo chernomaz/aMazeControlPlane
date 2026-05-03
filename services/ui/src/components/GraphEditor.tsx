@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { StepNode, FinishNode, type StepNodeData } from './StepNode'
+import { StepNode, FinishNode, OriginNode, type StepNodeData } from './StepNode'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,15 +36,17 @@ interface GraphEditorProps {
   allowedTools: string[]
   allowedAgents: string[]
   allowedLlmProviders?: string[]
+  agentId?: string
   readOnly?: boolean
   className?: string
 }
 
 const FINISH_ID = 'finish'
+const ORIGIN_ID = 'origin'
 const LEVEL_GAP = 100 // y between levels (60px node + 40px breathing room ≈ 100)
 const SIBLING_GAP = 200 // x between siblings (180px node + gap)
 
-const nodeTypes = { step: StepNode, finish: FinishNode }
+const nodeTypes = { step: StepNode, finish: FinishNode, origin: OriginNode }
 
 // ─── Layout (BFS from start_step) ────────────────────────────────────────────
 
@@ -101,21 +103,26 @@ function computeLayout(g: Graph): Map<number, { x: number; y: number }> {
 
 // ─── Round-trip helpers ──────────────────────────────────────────────────────
 
-export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
+export function graphToFlow(g: Graph, agentId?: string): { nodes: Node[]; edges: Edge[] } {
   const positions = computeLayout(g)
+  // Shift all steps down one level to make room for the origin node at the top.
+  const yOffset = agentId ? LEVEL_GAP : 0
 
-  const stepNodes: Node[] = (g.steps ?? []).map((s) => ({
-    id: String(s.step_id),
-    type: 'step',
-    position: positions.get(s.step_id) ?? { x: 0, y: 0 },
-    data: {
-      step_id: s.step_id,
-      call_type: s.call_type,
-      callee_id: s.callee_id,
-      max_loops: s.max_loops,
-      isStart: s.step_id === g.start_step,
-    } satisfies StepNodeData,
-  }))
+  const stepNodes: Node[] = (g.steps ?? []).map((s) => {
+    const pos = positions.get(s.step_id) ?? { x: 0, y: 0 }
+    return {
+      id: String(s.step_id),
+      type: 'step',
+      position: { x: pos.x, y: pos.y + yOffset },
+      data: {
+        step_id: s.step_id,
+        call_type: s.call_type,
+        callee_id: s.callee_id,
+        max_loops: s.max_loops,
+        isStart: s.step_id === g.start_step,
+      } satisfies StepNodeData,
+    }
+  })
 
   // Synthetic finish node — placed below the deepest level, centered.
   let maxLvl = 0
@@ -126,7 +133,7 @@ export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
   const finishNode: Node = {
     id: FINISH_ID,
     type: 'finish',
-    position: { x: 0, y: (maxLvl + 1) * LEVEL_GAP },
+    position: { x: 0, y: (maxLvl + 1) * LEVEL_GAP + yOffset },
     data: {},
     deletable: false,
   }
@@ -154,13 +161,36 @@ export function graphToFlow(g: Graph): { nodes: Node[]; edges: Edge[] } {
     }
   }
 
+  if (agentId) {
+    const startPos = positions.get(g.start_step) ?? { x: 0, y: 0 }
+    const originNode: Node = {
+      id: ORIGIN_ID,
+      type: 'origin',
+      position: { x: startPos.x, y: 0 },
+      data: { agentId },
+      draggable: false,
+      selectable: false,
+      deletable: false,
+    }
+    edges.push({
+      id: `${ORIGIN_ID}->${g.start_step}`,
+      source: ORIGIN_ID,
+      target: String(g.start_step),
+      animated: false,
+      deletable: false,
+      style: { stroke: '#5da9ff', strokeDasharray: '5 3' },
+    })
+    return { nodes: [...stepNodes, finishNode, originNode], edges }
+  }
+
   return { nodes: [...stepNodes, finishNode], edges }
 }
 
 export function flowToGraph(nodes: Node[], edges: Edge[]): Graph {
-  const stepNodes = nodes.filter((n) => n.id !== FINISH_ID)
+  const stepNodes = nodes.filter((n) => n.id !== FINISH_ID && n.id !== ORIGIN_ID)
+  const stepEdges = edges.filter((e) => e.source !== ORIGIN_ID)
 
-  const incoming = new Set(edges.filter((e) => e.target !== FINISH_ID).map((e) => e.target))
+  const incoming = new Set(stepEdges.filter((e) => e.target !== FINISH_ID).map((e) => e.target))
   // start = lowest step_id with no incoming edge from another real step;
   // fall back to lowest step_id if every node has an incoming edge.
   let start = Number.POSITIVE_INFINITY
@@ -175,7 +205,7 @@ export function flowToGraph(nodes: Node[], edges: Edge[]): Graph {
 
   const steps: Step[] = stepNodes.map((n) => {
     const d = n.data as StepNodeData
-    const next_steps = edges
+    const next_steps = stepEdges
       .filter((e) => e.source === n.id && e.target !== FINISH_ID)
       .map((e) => parseInt(e.target, 10))
       .filter((v) => Number.isFinite(v))
@@ -266,9 +296,10 @@ function GraphEditorInner({
   allowedTools,
   allowedAgents,
   allowedLlmProviders = [],
+  agentId,
   readOnly,
 }: GraphEditorProps) {
-  const initial = useMemo(() => graphToFlow(value), [])
+  const initial = useMemo(() => graphToFlow(value, agentId), [])
   // We deliberately seed nodes/edges from `value` only on first mount; after
   // that the editor owns the React Flow state and pushes back via onChange.
   // (Re-initialising on every prop change would clobber in-progress edits.)
@@ -298,12 +329,13 @@ function GraphEditorInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges])
 
-  // Mark current start in node data so the badge renders correctly.
-  // We pick the smallest step_id with no incoming edge.
+  // Mark current start in node data so the badge renders correctly, and keep
+  // the origin → start edge tracking the real start step.
+  // We pick the smallest step_id with no incoming edge from another real step.
   useEffect(() => {
-    const stepNodes = nodes.filter((n) => n.id !== FINISH_ID)
+    const stepNodes = nodes.filter((n) => n.id !== FINISH_ID && n.id !== ORIGIN_ID)
     if (stepNodes.length === 0) return
-    const incoming = new Set(edges.filter((e) => e.target !== FINISH_ID).map((e) => e.target))
+    const incoming = new Set(edges.filter((e) => e.target !== FINISH_ID && e.source !== ORIGIN_ID).map((e) => e.target))
     let startId = Number.POSITIVE_INFINITY
     for (const n of stepNodes) {
       const sid = (n.data as StepNodeData).step_id
@@ -313,20 +345,39 @@ function GraphEditorInner({
       startId = Math.min(...stepNodes.map((n) => (n.data as StepNodeData).step_id))
     }
 
-    // Only patch if mismatched, to avoid an infinite update loop.
-    let mutated = false
+    // Only patch nodes if mismatched, to avoid an infinite update loop.
+    let nodeMutated = false
     const patched = nodes.map((n) => {
-      if (n.id === FINISH_ID) return n
+      if (n.id === FINISH_ID || n.id === ORIGIN_ID) return n
       const d = n.data as StepNodeData
       const want = d.step_id === startId
       if ((d.isStart ?? false) !== want) {
-        mutated = true
+        nodeMutated = true
         return { ...n, data: { ...d, isStart: want } }
       }
       return n
     })
-    if (mutated) setNodes(patched)
-  }, [nodes, edges, setNodes])
+    if (nodeMutated) setNodes(patched)
+
+    // Keep the origin → start edge pointing at the current start step.
+    if (agentId) {
+      const startTarget = String(startId)
+      const current = edges.find((e) => e.source === ORIGIN_ID)
+      if (current?.target !== startTarget) {
+        setEdges((es) => [
+          ...es.filter((e) => e.source !== ORIGIN_ID),
+          {
+            id: `${ORIGIN_ID}->${startTarget}`,
+            source: ORIGIN_ID,
+            target: startTarget,
+            animated: false,
+            deletable: false,
+            style: { stroke: '#5da9ff', strokeDasharray: '5 3' },
+          },
+        ])
+      }
+    }
+  }, [nodes, edges, agentId, setNodes, setEdges])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -336,6 +387,8 @@ function GraphEditorInner({
       if (connection.source === connection.target) return
       // Reject edges originating from the finish node (it's a sink).
       if (connection.source === FINISH_ID) return
+      // Reject connections INTO the origin node (it's a pure source).
+      if (connection.target === ORIGIN_ID) return
       const stroke = connection.target === FINISH_ID ? '#1fbf75' : '#5da9ff'
       setEdges((eds) => addEdge({ ...connection, animated: true, style: { stroke } }, eds))
     },
@@ -344,7 +397,7 @@ function GraphEditorInner({
 
   function nextStepId(): number {
     const ids = nodes
-      .filter((n) => n.id !== FINISH_ID)
+      .filter((n) => n.id !== FINISH_ID && n.id !== ORIGIN_ID)
       .map((n) => (n.data as StepNodeData).step_id)
     return ids.length === 0 ? 1 : Math.max(...ids) + 1
   }
@@ -382,7 +435,7 @@ function GraphEditorInner({
   }
 
   function deleteNode(nodeId: string) {
-    if (nodeId === FINISH_ID) return
+    if (nodeId === FINISH_ID || nodeId === ORIGIN_ID) return
     setNodes((ns) => ns.filter((n) => n.id !== nodeId))
     setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId))
     setSelectedId(null)
@@ -392,7 +445,7 @@ function GraphEditorInner({
     setValidation(validateGraph(flowToGraph(nodes, edges)))
   }
 
-  const selectedNode = nodes.find((n) => n.id === selectedId && n.id !== FINISH_ID)
+  const selectedNode = nodes.find((n) => n.id === selectedId && n.id !== FINISH_ID && n.id !== ORIGIN_ID)
 
   return (
     <>
@@ -472,6 +525,7 @@ function GraphEditorInner({
             nodeStrokeColor="#2b3a59"
             nodeColor={(n) => {
               if (n.id === FINISH_ID) return '#1fbf75'
+              if (n.id === ORIGIN_ID) return '#5da9ff'
               const t = (n.data as StepNodeData).call_type
               if (t === 'tool') return '#43d1c6'
               if (t === 'llm') return '#f5c842'

@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Flag } from 'lucide-react'
+import { Flag, Bot } from 'lucide-react'
 import type { CallType } from '@/api/policy'
 
 // Visual style follows services/ui_mock/index.html (strict-mode graph
@@ -65,6 +65,32 @@ export function StepNode({ data, selected }: NodeProps) {
         <span>#{d.step_id}</span>
         <span>·</span>
         <span>loops: {d.max_loops}</span>
+      </div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !border-amaze-line !bg-amaze-muted"
+      />
+    </div>
+  )
+}
+
+// ─── Synthetic origin node (the agent itself — entry point) ──────────────────
+
+export function OriginNode({ data, selected }: NodeProps) {
+  const agentId = data.agentId as string
+  return (
+    <div
+      className={`min-w-[150px] rounded-lg border-2 border-amaze-blue/70 bg-amaze-blue/10 px-3 py-2 text-sm shadow-md transition-all ${
+        selected ? 'ring-2 ring-amaze-blue ring-offset-2 ring-offset-amaze-bg' : ''
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <Bot className="h-3.5 w-3.5 text-amaze-blue" />
+        <span className="font-mono text-xs font-semibold text-amaze-blue">{agentId}</span>
+        <span className="ml-auto inline-flex items-center rounded bg-amaze-blue/20 px-1.5 py-0.5 text-[10px] font-semibold text-amaze-blue">
+          self
+        </span>
       </div>
       <Handle
         type="source"

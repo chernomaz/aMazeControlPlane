@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 
 import redis.asyncio as redis
@@ -78,8 +79,6 @@ class GraphEnforcer:
 
         if agent_id is None or sid is None or kind is None:
             return
-        if kind == "llm":
-            return
 
         try:
             policy = await policy_store.get_policy(agent_id)
@@ -89,9 +88,28 @@ class GraphEnforcer:
         if policy is None or policy.mode != "strict" or policy.graph is None:
             return
 
-        if kind == "mcp":
+        if kind == "llm":
+            # Skip LLM calls unless the graph explicitly models llm steps.
+            # Backward-compatible: graphs with only tool/agent steps are unaffected.
+            if not any(s.call_type == "llm" for s in policy.graph.steps):
+                return
+            # Skip indirect (synthesis) LLM calls — those where the messages
+            # list contains a role:tool or role:function entry, meaning the LLM
+            # is processing a tool result rather than responding to a fresh
+            # user prompt. Only direct LLM calls are matched against the graph.
+            try:
+                body = json.loads(flow.request.content or b"{}")
+                messages = body.get("messages", []) if isinstance(body, dict) else []
+                if any(isinstance(m, dict) and m.get("role") in ("tool", "function")
+                       for m in messages):
+                    return
+            except (ValueError, TypeError):
+                return
+            call_type = "llm"
+            callee_id: str | None = flow.metadata.get("amaze_llm_provider")
+        elif kind == "mcp":
             call_type = "tool"
-            callee_id: str | None = flow.metadata.get("amaze_mcp_tool")
+            callee_id = flow.metadata.get("amaze_mcp_tool")
         elif kind == "a2a":
             call_type = "agent"
             callee_id = flow.metadata.get("amaze_target")
