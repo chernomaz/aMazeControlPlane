@@ -32,6 +32,7 @@ from typing import Any
 import redis.asyncio as redis
 import yaml
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from services.orchestrator.routers import agents as agents_router
@@ -138,6 +139,25 @@ async def _bootstrap_mcp_servers(r: redis.Redis) -> None:
 
 
 # --- Endpoints ------------------------------------------------------------
+
+@app.get("/ca.pem", response_class=PlainTextResponse)
+async def get_ca_cert() -> PlainTextResponse:
+    """Serve the mitmproxy CA certificate so remote agents can bootstrap
+    TLS trust without a manual copy step.
+
+    Remote agents call this before registration, write the cert to a temp
+    file, and set SSL_CERT_FILE + REQUESTS_CA_BUNDLE automatically.
+    Co-resident agents use the Docker volume mount instead and never call
+    this endpoint.
+    """
+    try:
+        cert = pathlib.Path(PROXY_CA_PATH).read_text()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="ca-not-found")
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"ca-read-error: {e}") from e
+    return PlainTextResponse(cert, media_type="application/x-pem-file")
+
 
 @app.get("/health")
 async def health() -> dict[str, Any]:

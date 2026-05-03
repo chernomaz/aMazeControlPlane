@@ -181,24 +181,23 @@ Add more `-R` lines for additional agents or MCP servers.
 
 ---
 
-## Part 4 — Get the Proxy CA Certificate
+## Part 4 — Proxy CA Certificate (automatic)
 
-Agents route all HTTPS traffic through the aMaze proxy (mitmproxy). To avoid
-TLS errors, they need the proxy's CA certificate.
+The aMaze SDK fetches the mitmproxy CA certificate automatically from
+`GET /ca.pem` on the orchestrator when the agent starts. No manual step
+needed for remote agents.
 
-Run on the **public machine**:
-
-```bash
-docker run --rm -v amaze-proxy-ca:/ca alpine \
-  cat /ca/mitmproxy-ca-cert.pem
+The SDK installs the cert before any HTTPS traffic is made:
+```
+Agent starts → SDK calls GET <orchestrator>/ca.pem
+            → writes cert to /tmp/amaze-ca-*.pem
+            → sets SSL_CERT_FILE + REQUESTS_CA_BUNDLE
+            → registers with orchestrator (now trusts the proxy)
 ```
 
-Copy the output and save it on the **local machine**:
-
-```bash
-nano ~/mitmproxy-ca-cert.pem
-# paste the certificate, save
-```
+Co-resident agents (same machine as platform) continue to use the Docker
+volume mount as before — the SDK skips the fetch if `SSL_CERT_FILE` is
+already set.
 
 ---
 
@@ -342,8 +341,6 @@ services:
         AGENT_MODULE: my_agent_a       # filename without .py
     container_name: agent-a
     restart: unless-stopped
-    volumes:
-      - ~/mitmproxy-ca-cert.pem:/etc/amaze/ca/mitmproxy-ca-cert.pem:ro
     environment:
       HTTP_PROXY:  http://<public-ip>:8080
       HTTPS_PROXY: http://<public-ip>:8080
@@ -354,8 +351,8 @@ services:
       AMAZE_A2A_HOST:  <public-ip>    # proxy calls back via tunnel
       AMAZE_A2A_PORT:  "9005"
       OPENAI_API_KEY:  ${OPENAI_API_KEY}
-      SSL_CERT_FILE:   /etc/amaze/ca/mitmproxy-ca-cert.pem
-      REQUESTS_CA_BUNDLE: /etc/amaze/ca/mitmproxy-ca-cert.pem
+      # No SSL_CERT_FILE needed — SDK fetches the CA cert from the
+      # orchestrator automatically on startup
     ports:
       - "9005:9005"
 
@@ -367,8 +364,6 @@ services:
         AGENT_MODULE: my_agent_b
     container_name: agent-b
     restart: unless-stopped
-    volumes:
-      - ~/mitmproxy-ca-cert.pem:/etc/amaze/ca/mitmproxy-ca-cert.pem:ro
     environment:
       HTTP_PROXY:  http://<public-ip>:8080
       HTTPS_PROXY: http://<public-ip>:8080
@@ -379,8 +374,6 @@ services:
       AMAZE_A2A_HOST:  <public-ip>
       AMAZE_A2A_PORT:  "9006"
       OPENAI_API_KEY:  ${OPENAI_API_KEY}
-      SSL_CERT_FILE:   /etc/amaze/ca/mitmproxy-ca-cert.pem
-      REQUESTS_CA_BUNDLE: /etc/amaze/ca/mitmproxy-ca-cert.pem
     ports:
       - "9006:9006"
 ```

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 import time
 import urllib.error
@@ -130,6 +131,44 @@ def cfg() -> Config:
     return _config
 
 
+def _fetch_and_install_ca() -> None:
+    """Fetch the mitmproxy CA cert from the orchestrator and install it
+    into SSL_CERT_FILE + REQUESTS_CA_BUNDLE so all outbound HTTPS calls
+    (LLM APIs, MCP servers) trust the proxy's interception certificate.
+
+    No-ops when:
+    - SSL_CERT_FILE is already set  → co-resident agent using volume mount
+    - /ca.pem returns 404           → CA not yet generated (rare race)
+    - Any network error             → local dev without proxy is unaffected
+    """
+    if os.environ.get("SSL_CERT_FILE"):
+        # Already set by the Docker volume mount (co-resident agent) or
+        # by the user explicitly — nothing to do.
+        return
+
+    url = f"{_config.orchestrator_url}/ca.pem"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            cert_pem = resp.read()
+    except Exception as e:  # noqa: BLE001 — non-fatal, log and continue
+        print(f"[amaze {_config.agent_id}] CA fetch skipped ({url}): {e}", flush=True)
+        return
+
+    # Write to a named temp file that persists for the process lifetime.
+    tmp = tempfile.NamedTemporaryFile(
+        prefix="amaze-ca-", suffix=".pem", delete=False
+    )
+    tmp.write(cert_pem)
+    tmp.close()
+
+    os.environ["SSL_CERT_FILE"] = tmp.name
+    os.environ["REQUESTS_CA_BUNDLE"] = tmp.name
+    print(
+        f"[amaze {_config.agent_id}] proxy CA installed: {url} → {tmp.name}",
+        flush=True,
+    )
+
+
 def register_and_wait(on_ready: threading.Event) -> None:
     """Background worker — register with the Orchestrator, set ready.
 
@@ -145,6 +184,8 @@ def register_and_wait(on_ready: threading.Event) -> None:
     agent_id is invalid, a 500 means the orchestrator is broken — all of
     which retries won't fix, and retrying a 4xx just multiplies log noise.
     """
+    _fetch_and_install_ca()
+
     payload = {"agent_id": _config.agent_id}
     if _config.a2a_host:
         payload["a2a_host"] = _config.a2a_host
