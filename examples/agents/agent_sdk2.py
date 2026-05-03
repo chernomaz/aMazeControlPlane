@@ -35,34 +35,33 @@ llm = ChatOpenAI(
 # handshake would fail. First inbound call (from agent-sdk via A2A)
 # triggers the build; subsequent calls reuse the cached agent.
 _agent = None
-_agent_lock = asyncio.Lock()
 
 
 async def _build_agent():
     global _agent
-    async with _agent_lock:
-        if _agent is None:
-            _log("building LangChain agent (loading MCP tools)")
-            client = MultiServerMCPClient(
-                {
-                    "tools": {
-                        "url": "http://demo-mcp:8000/mcp/",
-                        "transport": "streamable_http",
-                    }
-                }
-            )
-            tools = await client.get_tools()
-            _log(f"loaded {len(tools)} tools: {[t.name for t in tools]}")
-            _agent = create_agent(
-                model=llm,
-                tools=tools,
-                system_prompt=(
-                    "You are a task-dispatcher assistant. "
-                    "When asked for weather, call web_search with the query you are given. "
-                    "When asked to read mail, call dummy_email with the person name. "
-                    "Return a concise, factual answer with the result."
-                ),
-            )
+    if _agent is not None:
+        return _agent
+    _log("building LangChain agent (loading MCP tools)")
+    client = MultiServerMCPClient(
+        {
+            "tools": {
+                "url": "http://demo-mcp:8000/mcp/",
+                "transport": "streamable_http",
+            }
+        }
+    )
+    tools = await client.get_tools()
+    _log(f"loaded {len(tools)} tools: {[t.name for t in tools]}")
+    _agent = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=(
+            "You are a task-dispatcher assistant. "
+            "When asked for weather, call web_search with the query you are given. "
+            "When asked to read mail, call dummy_email with the person name. "
+            "Return a concise, factual answer with the result."
+        ),
+    )
     return _agent
 
 
@@ -119,4 +118,4 @@ async def _dispatch(q: Any) -> Any:
 
 
 if __name__ == "__main__":
-    amaze.init()
+    amaze.init(on_startup=_build_agent)

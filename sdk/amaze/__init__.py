@@ -50,7 +50,12 @@ from ._a2a import SendError
 __all__ = ["init", "send_message_to_agent", "SendError"]
 
 
-def init(agent_id: str | None = None, *, block: bool = True) -> None:
+def init(
+    agent_id: str | None = None,
+    *,
+    block: bool = True,
+    on_startup: "Any | None" = None,
+) -> None:
     """Bootstrap the SDK — register, start servers, dispatch handlers.
 
     Parameters
@@ -62,13 +67,29 @@ def init(agent_id: str | None = None, *, block: bool = True) -> None:
         returns — this is what an agent's `__main__` script wants. When
         False, spawns them on a background thread so integration tests
         can drive the process and tear it down manually.
+    on_startup:
+        Optional async callable (no arguments) that runs once, immediately
+        after the agent registers and receives its bearer token. Use it to
+        pre-build LangChain agents, fetch MCP tool lists, or warm any other
+        async resource before the first request arrives.
+
+        Example — eager MCP agent build::
+
+            async def startup():
+                await _build_agent()
+
+            amaze.init(on_startup=startup)
+
+        MCP tool discovery (tools/list, initialize) is allowed by the proxy
+        even before a policy is pushed, so this call will always succeed at
+        startup. Actual tool *calls* still require a policy.
     """
     _core.load(agent_id)
     # Walk the caller's globals so authors don't have to register handlers
     # explicitly. Depth=1 lands us in the module that called init().
     caller_globals: dict[str, Any] = sys._getframe(1).f_globals
     _handlers.register(caller_globals)
-    _a2a.start_server(block=block)
+    _a2a.start_server(block=block, on_startup=on_startup)
 
 
 def send_message_to_agent(target: str, message: Any) -> Any:

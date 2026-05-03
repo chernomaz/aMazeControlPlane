@@ -26,37 +26,37 @@ llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
-# The agent is built lazily on the first inbound message: at module-import
-# time the orchestrator has not yet pushed policy, so the MCP handshake
-# would be denied. By the first `receive_message_from_user` call, policy
-# is live and the MCP `get_tools` call succeeds.
+# MCP tool discovery (tools/list, initialize) is now allowed by the proxy
+# even before a policy is pushed — it is read-only metadata with no side
+# effects. The agent can therefore be built eagerly at startup rather than
+# lazily on the first message. _agent is set once by amaze.init() via the
+# startup hook and is read-only thereafter (no lock needed).
 _agent = None
-_agent_lock = asyncio.Lock()
 
 
 async def _build_agent():
     global _agent
-    async with _agent_lock:
-        if _agent is None:
-            client = MultiServerMCPClient(
-                {
-                    "tools": {
-                        "url": "http://demo-mcp:8000/mcp/",
-                        "transport": "streamable_http",
-                    }
-                }
-            )
-            tools = await client.get_tools()
-            _agent = create_agent(
-                model=llm,
-                tools=tools,
-                system_prompt=(
-                    "You are a helpful research assistant. "
-                    "Use the web_search tool ONLY when you need up-to-date "
-                    "external facts. Do not call any other tool. "
-                    "Always cite sources."
-                ),
-            )
+    if _agent is not None:
+        return _agent
+    client = MultiServerMCPClient(
+        {
+            "tools": {
+                "url": "http://demo-mcp:8000/mcp/",
+                "transport": "streamable_http",
+            }
+        }
+    )
+    tools = await client.get_tools()
+    _agent = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=(
+            "You are a helpful research assistant. "
+            "Use the web_search tool ONLY when you need up-to-date "
+            "external facts. Do not call any other tool. "
+            "Always cite sources."
+        ),
+    )
     return _agent
 
 
@@ -111,4 +111,4 @@ async def receive_message_from_user(q: Any) -> Any:
 
 
 if __name__ == "__main__":
-    amaze.init()
+    amaze.init(on_startup=_build_agent)

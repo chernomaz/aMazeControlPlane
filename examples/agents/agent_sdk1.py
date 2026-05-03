@@ -39,30 +39,30 @@ _agent_lock = asyncio.Lock()
 
 async def _build_agent():
     global _agent
-    async with _agent_lock:
-        if _agent is None:
-            _log("building LangChain agent (loading MCP tools)")
-            client = MultiServerMCPClient(
-                {
-                    "tools": {
-                        "url": "http://demo-mcp:8000/mcp/",
-                        "transport": "streamable_http",
-                    }
-                }
-            )
-            tools = await client.get_tools()
-            _log(f"loaded {len(tools)} tools: {[t.name for t in tools]}")
-            _agent = create_agent(
-                model=llm,
-                tools=tools,
-                system_prompt=(
-                    "You are a helpful research assistant. "
-                    "Use the web_search tool ONLY when you need up-to-date "
-                    "external facts. Do not call any other tool — the proxy "
-                    "will deny non-allowed calls. "
-                    "Always cite sources."
-                ),
-            )
+    if _agent is not None:
+        return _agent
+    _log("building LangChain agent (loading MCP tools)")
+    client = MultiServerMCPClient(
+        {
+            "tools": {
+                "url": "http://demo-mcp:8000/mcp/",
+                "transport": "streamable_http",
+            }
+        }
+    )
+    tools = await client.get_tools()
+    _log(f"loaded {len(tools)} tools: {[t.name for t in tools]}")
+    _agent = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=(
+            "You are a helpful research assistant. "
+            "Use the web_search tool ONLY when you need up-to-date "
+            "external facts. Do not call any other tool — the proxy "
+            "will deny non-allowed calls. "
+            "Always cite sources."
+        ),
+    )
     return _agent
 
 
@@ -95,4 +95,4 @@ async def receive_message_from_agent(caller: str, q: Any) -> Any:
 
 
 if __name__ == "__main__":
-    amaze.init()
+    amaze.init(on_startup=_build_agent)

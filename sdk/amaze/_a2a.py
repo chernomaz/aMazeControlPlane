@@ -332,15 +332,37 @@ def _a2a_app(ready: threading.Event) -> FastAPI:
     return app
 
 
-def start_server(block: bool = True) -> None:
+def start_server(
+    block: bool = True,
+    on_startup: "Callable[[], Any] | None" = None,
+) -> None:
     """Start both FastAPI servers + kick off registration in the background.
 
     When `block=True` (the default in `amaze.init()`), this never returns —
     the process's job is to serve requests forever. `block=False` is
     intended only for tests that want to tear the server down manually.
+
+    `on_startup` is an optional async callable that runs once, immediately
+    after registration completes (i.e. after the bearer token is received
+    and the `ready` event fires). Use it to pre-build LangChain agents,
+    fetch MCP tools, or warm any other async resource before the first
+    request arrives. Failures are logged but do not crash the agent.
     """
     c = _core.cfg()
     ready = threading.Event()
+
+    async def _run_startup_hook() -> None:
+        # Wait for the registration thread to set `ready`, then run the hook
+        # in the async event loop so it can freely await coroutines (e.g.
+        # MCP get_tools). asyncio.to_thread bridges the threading.Event
+        # into the async world without busy-waiting.
+        await asyncio.to_thread(ready.wait)
+        if on_startup is None:
+            return
+        try:
+            await on_startup()
+        except Exception as exc:  # noqa: BLE001 — non-fatal; log and continue
+            print(f"[amaze {c.agent_id}] on_startup hook failed: {exc}", flush=True)
 
     async def _serve() -> None:
         chat_config = uvicorn.Config(
@@ -354,6 +376,7 @@ def start_server(block: bool = True) -> None:
 
         chat_task = asyncio.create_task(chat_server.serve())
         a2a_task = asyncio.create_task(a2a_server.serve())
+        startup_task = asyncio.create_task(_run_startup_hook())
 
         # Don't register until both sockets are accepting — otherwise the
         # status can flip to RUNNING while the A2A port is still binding,
@@ -364,7 +387,7 @@ def start_server(block: bool = True) -> None:
             target=_core.register_and_wait, args=(ready,), daemon=True
         ).start()
 
-        await asyncio.gather(chat_task, a2a_task)
+        await asyncio.gather(chat_task, a2a_task, startup_task)
 
     if block:
         asyncio.run(_serve())

@@ -76,7 +76,19 @@ class PolicyEnforcer:
             return
 
         if policy is None:
-            deny(flow, "policy-not-found", agent_id=agent_id)
+            # Fail closed for everything EXCEPT MCP discovery (tools/list,
+            # initialize, etc.). Discovery is read-only metadata — it has no
+            # side effects and carries no sensitive data. Allowing it here
+            # removes the need for lazy agent initialisation in agent code:
+            # agents can now build their LangChain/MCP client at startup
+            # rather than on the first inbound message.
+            # tools/call always has a tool name — those still require a policy.
+            if not await self._is_mcp_discovery(flow):
+                deny(flow, "policy-not-found", agent_id=agent_id)
+                return
+            flow.metadata["amaze_kind"] = "mcp"
+            flow.metadata["amaze_mcp_server"] = flow.request.pretty_host
+            self._inject_caller(flow, agent_id)
             return
 
         host = flow.request.pretty_host
@@ -199,6 +211,24 @@ class PolicyEnforcer:
         params = body.get("params") or {}
         name = params.get("name")
         return str(name) if name else None
+
+    async def _is_mcp_discovery(self, flow: http.HTTPFlow) -> bool:
+        """Return True if this is a non-tool-call request to a registered MCP server.
+
+        tools/list, initialize, and SSE/ping requests are read-only metadata —
+        no side effects, no data exfiltration risk. Only tools/call (which has
+        a tool name) requires a policy entry.
+        """
+        host = flow.request.pretty_host
+        try:
+            mcp_entry = await self._lookup_mcp(host)
+        except _RedisLookupError:
+            return False
+        if mcp_entry is None:
+            return False
+        # _extract_mcp_tool returns a name only for tools/call; all other
+        # MCP methods (initialize, tools/list, ping, ...) return None.
+        return self._extract_mcp_tool(flow) is None
 
     async def _check_per_turn_limit(
         self,
