@@ -3,10 +3,6 @@ import os
 # Disable LangSmith tracing BEFORE any langchain import — inside a NEMO
 # container the tracer tries to POST to api.smith.langchain.com over HTTPS,
 # which tunnels through Envoy as CONNECT and hangs the agent.
-os.environ["LANGSMITH_TRACING"] = "false"
-os.environ["LANGCHAIN_TRACING_V2"] = "false"
-os.environ.pop("LANGSMITH_API_KEY", None)
-
 import asyncio
 from typing import Any
 

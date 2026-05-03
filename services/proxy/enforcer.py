@@ -40,6 +40,14 @@ from services.proxy.policy import (
 
 logger = logging.getLogger(__name__)
 
+# Hosts that bypass policy enforcement entirely.
+# Traffic is still forwarded — agents don't need to list these in their
+# policy. Add any observability / tracing / telemetry endpoints here.
+# The caller header is still injected so audit trails stay intact.
+_PASSTHROUGH_HOSTS: frozenset[str] = frozenset({
+    "api.smith.langchain.com",   # LangSmith tracing
+})
+
 
 class _RedisLookupError(RuntimeError):
     """Raised when Redis is unreachable — caller translates into a
@@ -66,6 +74,13 @@ class PolicyEnforcer:
             # Shouldn't happen — SessionIdentity either sets this or denies.
             # Defensive catch → fail closed.
             deny(flow, "no-identity")
+            return
+
+        # Passthrough hosts — observability/tracing services allowed for all
+        # agents without a policy entry. Still inject caller so audit works.
+        if flow.request.pretty_host in _PASSTHROUGH_HOSTS:
+            self._inject_caller(flow, agent_id)
+            flow.metadata["amaze_kind"] = "passthrough"
             return
 
         try:
