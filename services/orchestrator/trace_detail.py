@@ -398,7 +398,7 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
             "output_tokens": 0,
             "total_tokens": 0,
             "status": "ok",
-            "input": "",
+            "input": prompt,
             "output": "",
         })
 

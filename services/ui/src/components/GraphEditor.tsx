@@ -35,6 +35,7 @@ interface GraphEditorProps {
   onChange: (next: Graph) => void
   allowedTools: string[]
   allowedAgents: string[]
+  allowedLlmProviders?: string[]
   readOnly?: boolean
   className?: string
 }
@@ -264,6 +265,7 @@ function GraphEditorInner({
   onChange,
   allowedTools,
   allowedAgents,
+  allowedLlmProviders = [],
   readOnly,
 }: GraphEditorProps) {
   const initial = useMemo(() => graphToFlow(value), [])
@@ -414,6 +416,15 @@ function GraphEditorInner({
         >
           <Plus className="h-3.5 w-3.5" /> Add agent step
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => addStep('llm')}
+          disabled={readOnly}
+          className="border-amaze-yellow/40 text-amaze-yellow hover:bg-amaze-yellow/10"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add LLM step
+        </Button>
         <div className="ml-auto flex items-center gap-2">
           {validation && validation.ok && (
             <span className="inline-flex items-center gap-1 text-xs text-amaze-green">
@@ -462,7 +473,9 @@ function GraphEditorInner({
             nodeColor={(n) => {
               if (n.id === FINISH_ID) return '#1fbf75'
               const t = (n.data as StepNodeData).call_type
-              return t === 'tool' ? '#43d1c6' : '#a97cff'
+              if (t === 'tool') return '#43d1c6'
+              if (t === 'llm') return '#f5c842'
+              return '#a97cff'
             }}
             maskColor="rgba(11,16,32,0.6)"
             className="!bg-amaze-panel !border !border-amaze-line"
@@ -477,6 +490,7 @@ function GraphEditorInner({
               .map((n) => (n.data as StepNodeData).step_id)}
             allowedTools={allowedTools}
             allowedAgents={allowedAgents}
+            allowedLlmProviders={allowedLlmProviders}
             edges={edges}
             onUpdate={(patch) => updateNode(selectedNode.id, patch)}
             onUpdateNextSteps={(targetIds) => {
@@ -532,6 +546,7 @@ interface NodeConfigPanelProps {
   allSteps: number[]
   allowedTools: string[]
   allowedAgents: string[]
+  allowedLlmProviders: string[]
   edges: Edge[]
   onUpdate: (patch: Partial<StepNodeData>) => void
   onUpdateNextSteps: (targetIds: number[]) => void
@@ -544,6 +559,7 @@ function NodeConfigPanel({
   allSteps,
   allowedTools,
   allowedAgents,
+  allowedLlmProviders,
   edges,
   onUpdate,
   onUpdateNextSteps,
@@ -551,7 +567,10 @@ function NodeConfigPanel({
   onClose,
 }: NodeConfigPanelProps) {
   const d = node.data as StepNodeData
-  const calleeOptions = d.call_type === 'tool' ? allowedTools : allowedAgents
+  const calleeOptions =
+    d.call_type === 'tool' ? allowedTools :
+    d.call_type === 'llm' ? allowedLlmProviders :
+    allowedAgents
 
   const currentNext = edges
     .filter((e) => e.source === node.id && e.target !== FINISH_ID)
@@ -588,7 +607,7 @@ function NodeConfigPanel({
 
         <div className="space-y-1">
           <Label className="text-xs text-amaze-muted">callee_id</Label>
-          {calleeOptions.length > 0 && d.callee_id ? (
+          {calleeOptions.length > 0 ? (
             <Select
               value={d.callee_id}
               onValueChange={(v) => onUpdate({ callee_id: v })}
@@ -608,7 +627,11 @@ function NodeConfigPanel({
             <Input
               value={d.callee_id}
               onChange={(e) => onUpdate({ callee_id: e.target.value })}
-              placeholder={d.call_type === 'tool' ? 'tool name' : 'agent id'}
+              placeholder={
+                d.call_type === 'tool' ? 'tool name' :
+                d.call_type === 'llm' ? 'provider name' :
+                'agent id'
+              }
               className="h-7 text-xs"
             />
           )}

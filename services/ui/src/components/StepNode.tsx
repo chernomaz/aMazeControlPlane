@@ -27,6 +27,11 @@ const CALL_TYPE_STYLE: Record<CallType, { border: string; bg: string; text: stri
     bg: 'bg-amaze-violet/10',
     text: 'text-amaze-violet',
   },
+  llm: {
+    border: 'border-amaze-yellow/60',
+    bg: 'bg-amaze-yellow/10',
+    text: 'text-amaze-yellow',
+  },
 }
 
 export function StepNode({ data, selected }: NodeProps) {

@@ -18,7 +18,7 @@ import { apiFetch } from './client'
 // Graph types — kept compatible with T3.2's stub.
 // ---------------------------------------------------------------------------
 
-export type CallType = 'tool' | 'agent'
+export type CallType = 'tool' | 'agent' | 'llm'
 
 export interface Step {
   step_id: number

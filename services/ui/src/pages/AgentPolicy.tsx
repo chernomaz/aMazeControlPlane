@@ -478,6 +478,7 @@ export default function AgentPolicy() {
                 onChange={(g: Graph) => update({ graph: g })}
                 allowedTools={allTools}
                 allowedAgents={allAgents}
+                allowedLlmProviders={draft.allowed_llm_providers}
               />
             </GraphErrorBoundary>
           </div>
