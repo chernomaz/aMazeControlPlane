@@ -124,6 +124,52 @@ def load(agent_id_override: str | None = None) -> Config:
 _install_httpx_bearer_injector()
 
 
+def _early_ca_install() -> None:
+    """Run at import time: if SSL_CERT_FILE is set but the file is missing,
+    fetch the proxy CA from the orchestrator now — before any httpx/openai
+    client is constructed at module level.
+
+    This handles remote agents whose Dockerfile bakes in
+      SSL_CERT_FILE=/etc/amaze/ca/mitmproxy-ca-cert.pem
+    but have no volume mount supplying that file.  Co-resident agents with
+    the volume mount already have the file on disk → early return.
+    """
+    cert_path = os.environ.get("SSL_CERT_FILE", "")
+    if not cert_path:
+        return  # env var not set — nothing to do
+    if os.path.isfile(cert_path):
+        return  # file already on disk (co-resident agent with volume mount)
+
+    # File is missing.  Fetch from the orchestrator using the env var
+    # directly (load() hasn't been called yet).
+    orchestrator_url = os.environ.get(
+        "AMAZE_ORCHESTRATOR_URL", "http://amaze:8001"
+    ).rstrip("/")
+    url = f"{orchestrator_url}/ca.pem"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            cert_pem = resp.read()
+    except Exception as e:  # noqa: BLE001
+        # Cannot reach orchestrator yet — clear the broken env vars so
+        # httpx falls back to system CAs instead of crashing on a missing
+        # file.  The full fetch in register_and_wait() will set them later.
+        print(f"[amaze SDK] early CA fetch failed ({url}): {e}", flush=True)
+        del os.environ["SSL_CERT_FILE"]
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        return
+
+    # Write to a temp file and point both env vars at it.
+    tmp = tempfile.NamedTemporaryFile(prefix="amaze-ca-", suffix=".pem", delete=False)
+    tmp.write(cert_pem)
+    tmp.close()
+    os.environ["SSL_CERT_FILE"] = tmp.name
+    os.environ["REQUESTS_CA_BUNDLE"] = tmp.name
+    print(f"[amaze SDK] proxy CA installed early: {url} → {tmp.name}", flush=True)
+
+
+_early_ca_install()
+
+
 def cfg() -> Config:
     """Return the (loaded) Config. Must be called after `load()`."""
     if not _config.agent_id:
@@ -141,9 +187,10 @@ def _fetch_and_install_ca() -> None:
     - /ca.pem returns 404           → CA not yet generated (rare race)
     - Any network error             → local dev without proxy is unaffected
     """
-    if os.environ.get("SSL_CERT_FILE"):
-        # Already set by the Docker volume mount (co-resident agent) or
-        # by the user explicitly — nothing to do.
+    cert_path = os.environ.get("SSL_CERT_FILE", "")
+    if cert_path and os.path.isfile(cert_path):
+        # File exists — co-resident agent with volume mount, or early fetch
+        # already succeeded.  Nothing to do.
         return
 
     url = f"{_config.orchestrator_url}/ca.pem"
