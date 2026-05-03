@@ -28,15 +28,17 @@ function normalizeLane(name: string): string {
   return name
 }
 
-const LANE_WIDTH = 140
+const MIN_LANE_WIDTH = 140
 const ROW_HEIGHT = 40
 const HEADER_HEIGHT = 40
 const TOP_PADDING = 16
 const BOTTOM_PADDING = 16
 const SIDE_PADDING = 24
+// Approximate px per character at fontSize 11, JetBrains Mono
+const CHAR_WIDTH_PX = 7.2
 
 export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: Props) {
-  const { lanes, laneIndex } = useMemo(() => {
+  const { lanes, laneIndex, laneWidth } = useMemo(() => {
     // Preserve first-seen order across from/to fields.
     const order: string[] = []
     const seen = new Set<string>()
@@ -55,7 +57,11 @@ export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: 
     order.forEach((name, i) => {
       idx[name] = i
     })
-    return { lanes: order, laneIndex: idx }
+    // Compute lane width wide enough for the longest label + padding.
+    const maxLen = order.reduce((m, n) => Math.max(m, n.length), 0)
+    const computed = Math.ceil(maxLen * CHAR_WIDTH_PX) + 32
+    const laneWidth = Math.max(MIN_LANE_WIDTH, computed)
+    return { lanes: order, laneIndex: idx, laneWidth }
   }, [steps])
 
   if (steps.length === 0 || lanes.length === 0) {
@@ -73,11 +79,11 @@ export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: 
     )
   }
 
-  const width = SIDE_PADDING * 2 + Math.max(1, lanes.length - 1) * LANE_WIDTH + LANE_WIDTH
+  const width = SIDE_PADDING * 2 + Math.max(1, lanes.length - 1) * laneWidth + laneWidth
   const height =
     TOP_PADDING + HEADER_HEIGHT + steps.length * ROW_HEIGHT + BOTTOM_PADDING
 
-  const laneX = (i: number) => SIDE_PADDING + LANE_WIDTH / 2 + i * LANE_WIDTH
+  const laneX = (i: number) => SIDE_PADDING + laneWidth / 2 + i * laneWidth
 
   return (
     <svg
@@ -93,9 +99,9 @@ export default function SequenceDiagram({ steps, selectedIndex, onSelectStep }: 
         return (
           <g key={`lane-${name}`}>
             <rect
-              x={x - LANE_WIDTH / 2 + 8}
+              x={x - laneWidth / 2 + 8}
               y={TOP_PADDING}
-              width={LANE_WIDTH - 16}
+              width={laneWidth - 16}
               height={HEADER_HEIGHT - 8}
               rx={6}
               fill="var(--panel)"

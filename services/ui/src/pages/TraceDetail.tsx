@@ -525,9 +525,7 @@ export default function TraceDetail() {
               }}
             >
               {[
-                ['real', 'var(--blue)'],
-                ['mocked', 'var(--violet)'],
-                ['assertion', 'var(--cyan)'],
+                ['succeeded', 'var(--blue)'],
                 ['failed', 'var(--red)'],
               ].map(([label, color]) => (
                 <span
