@@ -4,7 +4,7 @@
 # Stage 2: serve the built bundle behind nginx, proxying /api/* to the
 #          orchestrator container at amaze:8001.
 #
-# Build:  docker build -f Dockerfile.ui -t amaze-ui .
+# Build:  docker build -f docker/Dockerfile.ui -t amaze-ui .
 # Run:    docker run -p 5173:80 --network amaze_default amaze-ui
 
 FROM node:20-alpine AS builder

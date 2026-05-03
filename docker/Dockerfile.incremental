@@ -10,7 +10,7 @@
 #     docker save amaze-amaze:latest | gzip > /home/ubuntu/docker-images/amaze-platform-base.tar.gz
 #
 # Usage:
-#   docker build -f Dockerfile.incremental -t amaze-amaze:latest .
+#   docker build -f docker/Dockerfile.incremental -t amaze-amaze:latest .
 #
 # This image is functionally identical to one built with the main Dockerfile,
 # except it reuses the Jaeger binary that was installed when the base image

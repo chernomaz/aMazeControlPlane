@@ -38,7 +38,7 @@ services:
   amaze:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: amaze-platform
     extra_hosts:
       # Lets the platform's proxy reach agent A2A endpoints and Redis via
@@ -63,7 +63,7 @@ services:
   amaze-ui:
     build:
       context: ..
-      dockerfile: Dockerfile.ui
+      dockerfile: docker/Dockerfile.ui
     container_name: amaze-ui
     ports:
       - "5173:80"      # browser → http://localhost:5173

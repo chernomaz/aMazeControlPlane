@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aMaze Control Plane — Proxy-first runtime governance for AI agents</title>
+  <meta name="description" content="aMaze routes all agent traffic through a proxy and orchestrator that enforces policies at runtime. Every LLM call, tool call, and agent-to-agent interaction — observed, audited, and controlled." />
+  <meta name="theme-color" content="#0a0a0f" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0a0a0f;
+      --bg-surface:   #0f0f1a;
+      --bg-card:      #13131f;
+      --bg-code:      #0d0d14;
+      --border:       rgba(255,255,255,0.07);
+      --border-hi:    rgba(255,255,255,0.12);
+      --accent:       #7c3aed;
+      --accent-hi:    #9d5cf5;
+      --accent-dim:   rgba(124,58,237,0.15);
+      --cyan:         #22d3ee;
+      --cyan-dim:     rgba(34,211,238,0.10);
+      --green:        #10b981;
+      --red:          #f87171;
+      --yellow:       #fbbf24;
+      --t1:           #f1f5f9;
+      --t2:           #94a3b8;
+      --t3:           #475569;
+      --font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --mono:         'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--t1);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(124,58,237,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124,58,237,0.03) 1px, transparent 1px);
+      background-size: 44px 44px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── NAV ─────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(14px);
+      background: rgba(10,10,15,0.80);
+    }
+    nav .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 600; font-size: 15px; letter-spacing: -0.01em;
+    }
+    .logomark {
+      width: 30px; height: 30px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--cyan));
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 12px; font-weight: 700; color: #fff;
+    }
+    .nav-links { display: flex; align-items: center; gap: 4px; }
+    .nav-a {
+      font-size: 13px; color: var(--t2); padding: 6px 12px;
+      border-radius: 6px; transition: color .15s, background .15s;
+    }
+    .nav-a:hover { color: var(--t1); background: rgba(255,255,255,0.05); }
+    .btn-outline {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; color: var(--t2); padding: 6px 12px;
+      border-radius: 6px; border: 1px solid var(--border);
+      transition: all .15s;
+    }
+    .btn-outline:hover { color: var(--t1); border-color: var(--border-hi); background: rgba(255,255,255,0.03); }
+
+    /* ── HERO ────────────────────────────────────── */
+    .hero {
+      padding: 104px 0 88px;
+      text-align: center;
+      position: relative;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
+      width: 700px; height: 600px;
+      background: radial-gradient(ellipse, rgba(124,58,237,0.13) 0%, transparent 68%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 11.5px; font-family: var(--mono); letter-spacing: 0.04em;
+      color: var(--accent-hi);
+      background: var(--accent-dim);
+      border: 1px solid rgba(124,58,237,0.28);
+      border-radius: 100px; padding: 4px 14px;
+      margin-bottom: 30px;
+    }
+    .badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent-hi);
+      animation: blink 2.2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    h1 {
+      font-size: clamp(38px, 6.5vw, 70px);
+      font-weight: 800; letter-spacing: -0.035em; line-height: 1.06;
+      margin-bottom: 22px;
+      background: linear-gradient(140deg, #f1f5f9 30%, #7c8fa8 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 19px); color: var(--t2);
+      max-width: 540px; margin: 0 auto 40px; line-height: 1.58;
+    }
+    .hero-ctas {
+      display: flex; gap: 12px; justify-content: center;
+      flex-wrap: wrap; margin-bottom: 48px;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--accent); color: #fff;
+      font-size: 14px; font-weight: 500;
+      padding: 10px 22px; border-radius: 8px;
+      transition: all .15s;
+    }
+    .btn-primary:hover {
+      background: var(--accent-hi);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 28px rgba(124,58,237,0.32);
+    }
+    .hero-cmd {
+      display: inline-flex; align-items: center; gap: 12px;
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 20px;
+      font-family: var(--mono); font-size: 13px; color: var(--t2);
+    }
+    .hero-cmd .p { color: var(--accent-hi); }
+    .hero-cmd .c { color: var(--t1); }
+
+    /* ── SECTIONS ────────────────────────────────── */
+    section { padding: 80px 0; position: relative; z-index: 1; }
+    .divider { height: 1px; background: var(--border); }
+    .sec-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--accent-hi);
+      font-family: var(--mono); margin-bottom: 12px;
+    }
+    h2 {
+      font-size: clamp(26px, 4vw, 42px);
+      font-weight: 700; letter-spacing: -0.025em; line-height: 1.12;
+      margin-bottom: 16px;
+    }
+    .sec-intro {
+      font-size: 17px; color: var(--t2);
+      max-width: 540px; line-height: 1.6; margin-bottom: 48px;
+    }
+    code {
+      font-family: var(--mono); font-size: 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 4px; padding: 2px 6px; color: var(--cyan);
+    }
+
+    /* ── PROBLEM GRID ────────────────────────────── */
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1px; background: var(--border);
+      border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    @media (max-width: 900px) {
+      .problem-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .problem-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .prob {
+      background: var(--bg-card); padding: 28px;
+    }
+    .prob-icon { font-size: 22px; margin-bottom: 12px; }
+    .prob h3 { font-size: 14px; font-weight: 600; margin-bottom: 7px; }
+    .prob p { font-size: 13px; color: var(--t2); line-height: 1.55; }
+
+    /* ── ARCH BLOCK ──────────────────────────────── */
+    .arch-pre {
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px 32px;
+      font-family: var(--mono); font-size: 13px; line-height: 1.85;
+      overflow-x: auto; margin-bottom: 32px;
+    }
+    .a-node  { color: var(--cyan); }
+    .a-arrow { color: var(--accent-hi); }
+    .a-label { color: var(--t2); }
+
+    .addon-chain { display: flex; flex-direction: column; gap: 2px; }
+    .addon-row {
+      display: grid; grid-template-columns: 168px 1fr;
+      gap: 16px; align-items: center;
+      padding: 10px 16px; border-radius: 8px;
+      transition: background .15s;
+    }
+    .addon-row:hover { background: rgba(255,255,255,0.028); }
+    .addon-name { font-family: var(--mono); font-size: 13px; color: var(--cyan); font-weight: 500; }
+    .addon-desc { font-size: 13px; color: var(--t2); }
+    .chain-sep { font-size: 16px; color: rgba(124,58,237,0.3); text-align: center; padding: 3px 0; }
+
+    /* ── FEATURES GRID ───────────────────────────── */
+    .feat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1px; background: var(--border);
+      border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .feat {
+      background: var(--bg-card); padding: 28px;
+      transition: background .15s;
+    }
+    .feat:hover { background: #15152a; }
+    .feat-icon {
+      width: 38px; height: 38px; border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; margin-bottom: 14px;
+    }
+    .feat h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .feat p  { font-size: 13px; color: var(--t2); line-height: 1.55; }
+
+    /* ── COMPARE TABLE ───────────────────────────── */
+    .cmp-table {
+      width: 100%; border-collapse: collapse;
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    }
+    .cmp-table th {
+      padding: 13px 20px; text-align: left;
+      font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--t3);
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .cmp-table td {
+      padding: 13px 20px; font-size: 13px;
+      border-bottom: 1px solid var(--border); vertical-align: top;
+    }
+    .cmp-table tr:last-child td { border-bottom: none; }
+    .cmp-table td:first-child { color: var(--t2); font-weight: 500; width: 22%; }
+    .cmp-table td:nth-child(2) { color: var(--t3); width: 36%; }
+    .cmp-table td:nth-child(3) { color: var(--t1); }
+    .cmp-table tr:hover td { background: rgba(255,255,255,0.018); }
+    .chk { color: var(--green); margin-right: 6px; }
+
+    /* ── CODE BLOCK ──────────────────────────────── */
+    .code-block {
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .code-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.018);
+    }
+    .dots { display: flex; gap: 6px; }
+    .dots span { width: 10px; height: 10px; border-radius: 50%; }
+    .d-r { background: #ff5f57; } .d-y { background: #febc2e; } .d-g { background: #28c840; }
+    .fname { font-family: var(--mono); font-size: 12px; color: var(--t3); }
+    .code-body {
+      padding: 24px 26px;
+      font-family: var(--mono); font-size: 13px; line-height: 1.75;
+      overflow-x: auto;
+    }
+    /* token colors — one-dark palette */
+    .kw  { color: #c678dd; }   /* keyword */
+    .fn  { color: #61afef; }   /* function */
+    .st  { color: #98c379; }   /* string */
+    .nm  { color: #d19a66; }   /* number */
+    .cm  { color: #4b5263; }   /* comment */
+    .ky  { color: #e06c75; }   /* yaml key */
+    .va  { color: #e5c07b; }   /* variable */
+    .pl  { color: var(--t1); } /* plain */
+    .dm  { color: var(--t3); } /* dim */
+    .cy  { color: var(--cyan);}
+
+    /* ── QUICKSTART STEPS ────────────────────────── */
+    .steps { display: flex; flex-direction: column; gap: 28px; }
+    .step  { display: grid; grid-template-columns: 40px 1fr; gap: 20px; align-items: start; }
+    .step-n {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+      background: var(--accent-dim); border: 1px solid rgba(124,58,237,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-hi);
+    }
+    .step-body h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+
+    /* ── OBS GRID ────────────────────────────────── */
+    .obs-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;
+    }
+    .obs-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px;
+    }
+    .obs-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .obs-sub { font-size: 12px; color: var(--t3); font-family: var(--mono); margin-bottom: 16px; }
+    .obs-card pre {
+      font-family: var(--mono); font-size: 12px; color: var(--t2); line-height: 1.75;
+      background: var(--bg-code); border-radius: 8px; padding: 16px; overflow-x: auto;
+    }
+    .obs-hi { color: var(--cyan); }
+
+    /* ── FAILURE TABLE ───────────────────────────── */
+    .fail-table {
+      width: 100%; border-collapse: collapse;
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    }
+    .fail-table th {
+      padding: 12px 20px; text-align: left;
+      font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--t3);
+      background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    }
+    .fail-table td {
+      padding: 12px 20px; font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .fail-table tr:last-child td { border-bottom: none; }
+    .fail-table td:first-child { color: var(--t2); }
+    .fail-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; }
+    .fail-table tr:hover td { background: rgba(255,255,255,0.018); }
+    .c403 { color: var(--red); }
+    .c429 { color: var(--yellow); }
+    .c503 { color: var(--yellow); }
+
+    /* ── ARCH TABLE ──────────────────────────────── */
+    .arch-table {
+      width: 100%; border-collapse: collapse;
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+      margin-top: 32px;
+    }
+    .arch-table th {
+      padding: 12px 20px; text-align: left;
+      font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--t3);
+      background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    }
+    .arch-table td {
+      padding: 12px 20px; font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .arch-table tr:last-child td { border-bottom: none; }
+    .arch-table td:first-child { font-family: var(--mono); font-size: 12px; color: var(--cyan); }
+    .arch-table td:nth-child(2) { font-family: var(--mono); font-size: 12px; color: var(--accent-hi); }
+    .arch-table td:nth-child(3) { color: var(--t3); font-family: var(--mono); font-size: 12px; }
+    .arch-table td:nth-child(4) { color: var(--t2); font-size: 13px; }
+
+    /* ── CTA ─────────────────────────────────────── */
+    .cta { text-align: center; padding: 100px 0; position: relative; }
+    .cta::before {
+      content: '';
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      width: 500px; height: 300px;
+      background: radial-gradient(ellipse, rgba(124,58,237,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .cta h2 { font-size: clamp(28px, 4vw, 46px); margin-bottom: 16px; }
+    .cta p  { font-size: 17px; color: var(--t2); margin-bottom: 36px; }
+
+    /* ── FOOTER ──────────────────────────────────── */
+    footer { border-top: 1px solid var(--border); padding: 32px 0; }
+    footer .wrap { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .ft-copy { font-size: 13px; color: var(--t3); }
+    .ft-links { display: flex; gap: 20px; }
+    .ft-links a { font-size: 13px; color: var(--t3); transition: color .15s; }
+    .ft-links a:hover { color: var(--t2); }
+
+    @media (max-width: 640px) {
+      .step  { grid-template-columns: 32px 1fr; gap: 14px; }
+      .addon-row { grid-template-columns: 140px 1fr; }
+      nav .wrap { padding: 0 16px; }
+      .nav-a { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="wrap">
+    <a href="#" class="nav-logo">
+      <div class="logomark">aM</div>
+      aMaze Control Plane
+    </a>
+    <div class="nav-links">
+      <a href="#how-it-works" class="nav-a">How it works</a>
+      <a href="#quick-start" class="nav-a">Quick start</a>
+      <a href="#policy" class="nav-a">Policy</a>
+      <a href="https://github.com/chernomaz/aMazeControlPlane" class="btn-outline" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <div class="badge"><span class="badge-dot"></span>Open Source · Apache 2.0</div>
+    <h1>Runtime governance<br>for AI agents</h1>
+    <p class="hero-sub">Every LLM call, tool call, and agent-to-agent interaction — enforced, audited, and traced in real time. Without touching your agent code.</p>
+    <div class="hero-ctas">
+      <a href="#quick-start" class="btn-primary">
+        Get started
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+      <a href="https://github.com/chernomaz/aMazeControlPlane" class="btn-outline" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <div class="hero-cmd">
+      <span class="p">$</span>
+      <span class="c">docker compose -f docker/docker-compose.yml up -d</span>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- WHY -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">The problem</div>
+    <h2>Agents act.<br>You find out later.</h2>
+    <p class="sec-intro">Modern agent frameworks make it easy to build agents, but hard to control them once they start acting autonomously.</p>
+    <div class="problem-grid">
+      <div class="prob">
+        <div class="prob-icon">🔧</div>
+        <h3>Unexpected tool calls</h3>
+        <p>Agents reach tools you didn't intend, with no gate between them and the action.</p>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">💸</div>
+        <h3>Hidden token spend</h3>
+        <p>LLM cost grows through loops and retries with no per-agent budget enforcement.</p>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">🔍</div>
+        <h3>Blind MCP traffic</h3>
+        <p>MCP servers run on different hosts with no central record of what was called or by whom.</p>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">🔗</div>
+        <h3>Uncontrolled A2A</h3>
+        <p>Agent-to-agent calls bypass central security logic with no identity verification.</p>
+      </div>
+      <div class="prob">
+        <div class="prob-icon">🧾</div>
+        <h3>Traces without decisions</h3>
+        <p>Traces show what happened, but not why it was allowed — no policy context in the record.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- HOW IT WORKS -->
+<section id="how-it-works">
+  <div class="wrap">
+    <div class="sec-label">Architecture</div>
+    <h2>The proxy is<br>the control plane</h2>
+    <p class="sec-intro">aMaze intercepts all agent traffic at the network layer. Point <code>HTTP_PROXY</code> at it — no agent code changes, no framework integration required.</p>
+
+    <div class="arch-pre"><span class="a-node">Agent</span>  <span class="a-arrow">──── HTTP_PROXY ────►</span>  <span class="a-node">aMaze Proxy</span>  <span class="a-label">(mitmproxy + addon chain)</span>
+                                        <span class="a-arrow">│</span>
+          <span class="a-arrow">┌───────────────────────┼───────────────────────┐</span>
+          <span class="a-arrow">▼</span>                       <span class="a-arrow">▼</span>                       <span class="a-arrow">▼</span>
+   <span class="a-node">LLM Provider</span>           <span class="a-node">MCP Server</span>              <span class="a-node">Peer Agent</span>
+   <span class="a-label">openai, anthropic…</span>      <span class="a-label">tool calls</span>               <span class="a-label">A2A calls</span></div>
+
+    <p style="font-size:14px;color:var(--t2);margin-bottom:20px;">Every request passes through the addon chain in order. If any step raises, the request is denied. There is no fail-open mode.</p>
+
+    <div class="addon-chain">
+      <div class="addon-row">
+        <div class="addon-name">session_id</div>
+        <div class="addon-desc">Resolve bearer token → agent identity. Strip client-supplied identity headers, inject trusted <code>x-amaze-caller</code>.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">policy_enforcer</div>
+        <div class="addon-desc">A2A / MCP / LLM allowlist checks against the agent's policy in Redis.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">graph_enforcer</div>
+        <div class="addon-desc">Step ordering and loop limits — strict or flexible execution graph mode.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">stream_blocker</div>
+        <div class="addon-desc">Inject <code>"stream": false</code> into LLM requests — guarantees complete audit records and accurate token counting.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">tracer</div>
+        <div class="addon-desc">Open OTel span on request, close on response. All other addons attach attributes to the same span.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">router</div>
+        <div class="addon-desc">Resolve host → upstream URL from Redis, forward the request.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">counters</div>
+        <div class="addon-desc">RedisTimeSeries — token and call metrics per agent, used for time-window rate limit pre-checks.</div>
+      </div>
+      <div class="chain-sep">↓</div>
+      <div class="addon-row">
+        <div class="addon-name">audit_log</div>
+        <div class="addon-desc">XADD to Redis Stream — one immutable record per call, linked to the OTel span via <code>trace_id</code>.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FEATURES -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">Capabilities</div>
+    <h2>Everything you need<br>to govern agents</h2>
+    <p class="sec-intro">One YAML policy per agent, stored in Redis at runtime. Changes via the GUI or API take effect on the next request — no restart.</p>
+    <div class="feat-grid">
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(124,58,237,0.15);">🔐</div>
+        <h3>A2A enforcement</h3>
+        <p>Control which agents can call which peers. Identity is injected by the proxy — never client-controlled.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(34,211,238,0.10);">🔧</div>
+        <h3>MCP tool enforcement</h3>
+        <p>Allow or deny specific tools per MCP server. Unknown servers and tools are blocked by default.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(16,185,129,0.10);">🤖</div>
+        <h3>LLM enforcement</h3>
+        <p>Allowlist providers and models. Cap token spend per turn and per time window via RedisTimeSeries.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(251,191,36,0.10);">📊</div>
+        <h3>Execution graph</h3>
+        <p>Strict mode: enforce exact call ordering with per-step loop limits. Flexible mode: any-order allowed set.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(248,113,113,0.10);">⏱️</div>
+        <h3>Per-turn limits</h3>
+        <p><code>max_tokens</code>, <code>max_tool_calls</code>, <code>max_agent_calls</code> — reset at the start of each user message.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(124,58,237,0.15);">📋</div>
+        <h3>Immutable audit log</h3>
+        <p>Redis Streams — every call, allowed or denied, with full input/output, denial reason, and OTel link.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(34,211,238,0.10);">🔭</div>
+        <h3>Distributed traces</h3>
+        <p>OTel spans → Jaeger. Each conversation shares one <code>trace_id</code>. A2A hops propagate trace context.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(16,185,129,0.10);">🖥️</div>
+        <h3>GUI dashboard</h3>
+        <p>Live KPIs, sequence diagrams, alert views, and a drag-to-connect execution graph editor.</p>
+      </div>
+      <div class="feat">
+        <div class="feat-icon" style="background:rgba(251,191,36,0.10);">🔌</div>
+        <h3>Zero framework coupling</h3>
+        <p>LangChain, CrewAI, raw httpx — anything that sets <code>HTTP_PROXY</code> works without modification.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- COMPARISON -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">Why aMaze</div>
+    <h2>Control at the network layer,<br>not inside agent code</h2>
+    <p class="sec-intro">Most agent guardrails live inside the framework and break when you switch. aMaze enforces at the proxy — same gate for every framework.</p>
+    <table class="cmp-table">
+      <thead>
+        <tr><th>Area</th><th>Typical approach</th><th>aMaze</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Enforcement location</td>
+          <td>Inside agent code</td>
+          <td><span class="chk">✓</span>Proxy + policy engine — no agent changes required</td>
+        </tr>
+        <tr>
+          <td>Framework dependency</td>
+          <td>Often framework-specific</td>
+          <td><span class="chk">✓</span>Works with anything that respects <code>HTTP_PROXY</code></td>
+        </tr>
+        <tr>
+          <td>MCP visibility</td>
+          <td>Usually partial</td>
+          <td><span class="chk">✓</span>Every MCP call routed and governed through the proxy</td>
+        </tr>
+        <tr>
+          <td>Remote agents</td>
+          <td>Often unmanaged</td>
+          <td><span class="chk">✓</span>Registered, identity-verified, and policy-bound</td>
+        </tr>
+        <tr>
+          <td>Audit trail</td>
+          <td>Logs and traces only</td>
+          <td><span class="chk">✓</span>Decision evidence + traces + policy context per call</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- QUICK START -->
+<section id="quick-start">
+  <div class="wrap">
+    <div class="sec-label">Quick start</div>
+    <h2>Up and running<br>in minutes</h2>
+    <p class="sec-intro">Prerequisites: Docker + Docker Compose. See <code>examples/compose.yml</code> for a complete multi-agent reference.</p>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Start the control plane</h3>
+          <div class="code-block">
+            <div class="code-hdr">
+              <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+              <div class="fname">bash</div>
+            </div>
+            <div class="code-body"><span class="dm">$</span> <span class="pl">docker compose -f docker/docker-compose.yml up -d</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Wire aMaze into your agent</h3>
+          <div class="code-block">
+            <div class="code-hdr">
+              <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+              <div class="fname">my_agent.py</div>
+            </div>
+            <div class="code-body"><span class="kw">import</span> <span class="pl">amaze</span>
+
+<span class="cm"># Define one or both handlers — aMaze discovers them automatically.</span>
+<span class="kw">async def</span> <span class="fn">receive_message_from_user</span>(<span class="va">message</span>):
+    <span class="va">result</span> = <span class="kw">await</span> my_agent.ainvoke({<span class="st">"messages"</span>: [{<span class="st">"role"</span>: <span class="st">"user"</span>, <span class="st">"content"</span>: <span class="va">message</span>}]})
+    <span class="kw">return</span> <span class="va">result</span>[<span class="st">"messages"</span>][-<span class="nm">1</span>].content
+
+<span class="kw">async def</span> <span class="fn">receive_message_from_agent</span>(<span class="va">caller</span>, <span class="va">message</span>):
+    <span class="kw">return</span> <span class="kw">await</span> <span class="fn">receive_message_from_user</span>(<span class="va">message</span>)
+
+<span class="kw">if</span> __name__ == <span class="st">"__main__"</span>:
+    amaze.<span class="fn">init</span>()  <span class="cm"># reads AMAZE_AGENT_ID from env, registers, starts servers</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>Add your agent as a compose service</h3>
+          <div class="code-block">
+            <div class="code-hdr">
+              <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+              <div class="fname">docker-compose.agents.yml</div>
+            </div>
+            <div class="code-body"><span class="ky">services</span><span class="pl">:</span>
+  <span class="ky">my-agent</span><span class="pl">:</span>
+    <span class="ky">build</span><span class="pl">: .</span>
+    <span class="ky">environment</span><span class="pl">:</span>
+      <span class="ky">AMAZE_AGENT_ID</span><span class="pl">: my-agent</span>
+      <span class="ky">AMAZE_ORCHESTRATOR_URL</span><span class="pl">: http://host.docker.internal:8001</span>
+      <span class="ky">HTTP_PROXY</span><span class="pl">: http://host.docker.internal:8080</span>
+      <span class="ky">HTTPS_PROXY</span><span class="pl">: http://host.docker.internal:8080</span>
+    <span class="ky">extra_hosts</span><span class="pl">:</span>
+      <span class="pl">- </span><span class="st">"host.docker.internal:host-gateway"</span></div>
+          </div>
+          <br>
+          <div class="code-block">
+            <div class="code-hdr">
+              <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+              <div class="fname">bash</div>
+            </div>
+            <div class="code-body"><span class="dm">$</span> <span class="pl">docker compose \
+    -f docker/docker-compose.yml \
+    -f docker-compose.agents.yml \
+    up --build</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /steps -->
+
+    <div style="margin-top:28px;padding:16px 20px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:12px;">
+      <span style="font-size:20px;">✅</span>
+      <span style="font-size:13px;color:var(--t2);">Your agent is now under full policy enforcement. Jaeger traces at <code>http://localhost:16686</code> · Control plane GUI at <code>http://localhost:5173</code></span>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- POLICY -->
+<section id="policy">
+  <div class="wrap">
+    <div class="sec-label">Policy model</div>
+    <h2>One YAML policy<br>per agent</h2>
+    <p class="sec-intro">Stored in Redis at runtime. The GUI and <code>PUT /policy/{id}</code> API write to Redis directly — changes are live on the next request, no restart needed.</p>
+    <div class="code-block">
+      <div class="code-hdr">
+        <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+        <div class="fname">config/policies.yaml</div>
+      </div>
+      <div class="code-body"><span class="ky">name</span><span class="pl">: my-agent-policy</span>
+
+<span class="cm"># Per-turn limits — reset at the start of each user message</span>
+<span class="ky">max_tokens_per_turn</span><span class="pl">:      </span><span class="nm">10000</span>
+<span class="ky">max_tool_calls_per_turn</span><span class="pl">:  </span><span class="nm">20</span>
+<span class="ky">max_agent_calls_per_turn</span><span class="pl">: </span><span class="nm">5</span>
+<span class="ky">allowed_llm_providers</span><span class="pl">: [openai, anthropic]</span>
+
+<span class="cm"># Time-window token budgets via RedisTimeSeries</span>
+<span class="ky">token_rate_limits</span><span class="pl">:</span>
+  <span class="pl">- </span><span class="ky">window</span><span class="pl">: 10m  </span><span class="ky">max_tokens</span><span class="pl">: </span><span class="nm">2000</span>
+  <span class="pl">- </span><span class="ky">window</span><span class="pl">: 1h   </span><span class="ky">max_tokens</span><span class="pl">: </span><span class="nm">10000</span>
+
+<span class="cm"># alert always written; these control blocking only</span>
+<span class="ky">on_budget_exceeded</span><span class="pl">: block   </span><span class="cm"># block | allow</span>
+<span class="ky">on_violation</span><span class="pl">: block         </span><span class="cm"># block | allow</span>
+
+<span class="cm"># flexible: any-order allowed set</span>
+<span class="ky">mode</span><span class="pl">: flexible</span>
+<span class="ky">allowed_tools</span><span class="pl">:  [web_search, summarize]</span>
+<span class="ky">allowed_agents</span><span class="pl">: [summarizer-agent]</span>
+
+<span class="cm"># strict: enforce exact call order with per-step loop limits</span>
+<span class="dm"># mode: strict</span>
+<span class="dm"># graph:</span>
+<span class="dm">#   start_step: 1</span>
+<span class="dm">#   steps:</span>
+<span class="dm">#     - step_id: 1</span>
+<span class="dm">#       call_type: tool</span>
+<span class="dm">#       callee_id: web_search</span>
+<span class="dm">#       max_loops: 3</span>
+<span class="dm">#       next_steps: [2]</span>
+<span class="dm">#     - step_id: 2</span>
+<span class="dm">#       call_type: agent</span>
+<span class="dm">#       callee_id: summarizer-agent</span>
+<span class="dm">#       max_loops: 1</span>
+<span class="dm">#       next_steps: []</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- OBSERVABILITY -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">Observability</div>
+    <h2>Three correlated records<br>per call</h2>
+    <p class="sec-intro">Every proxied call — allowed or denied — produces an audit record, an OTel span, and a metrics data point. All three share the same <code>trace_id</code>.</p>
+    <div class="obs-grid">
+      <div class="obs-card">
+        <h3>📋 Audit log</h3>
+        <div class="obs-sub">audit:{agent_id} · Redis Streams</div>
+        <pre><span class="obs-hi">trace_id</span>   span_id
+agent_id   session_id
+kind       target    tool
+input      output    ts
+denied     denial_reason</pre>
+      </div>
+      <div class="obs-card">
+        <h3>🔭 OTel traces</h3>
+        <div class="obs-sub">Jaeger all-in-one · port 16686</div>
+        <pre>All calls in one conversation
+share a single <span class="obs-hi">trace_id</span>
+
+A2A hops propagate trace
+context automatically
+
+Linked to audit records via
+trace_id + span_id</pre>
+      </div>
+      <div class="obs-card">
+        <h3>📈 Metrics</h3>
+        <div class="obs-sub">RedisTimeSeries · per-agent keys</div>
+        <pre>ts:{id}:<span class="obs-hi">llm_tokens</span>
+ts:{id}:<span class="obs-hi">tool_calls</span>
+ts:{id}:<span class="obs-hi">a2a_calls</span>
+ts:{id}:<span class="obs-hi">denials</span>
+
+Used for time-window rate
+limit pre-checks</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FAILURE HANDLING -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">Failure handling</div>
+    <h2>Fails closed.<br>Always.</h2>
+    <p class="sec-intro">If any addon in the chain raises, the request is denied. There is no fail-open path.</p>
+    <table class="fail-table">
+      <thead><tr><th>Condition</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Unknown bearer token</td>           <td class="c403">403 invalid-bearer</td></tr>
+        <tr><td>Agent not in peer's allowlist</td>  <td class="c403">403 not-allowed</td></tr>
+        <tr><td>MCP server not registered</td>      <td class="c403">403 mcp-not-allowed</td></tr>
+        <tr><td>Tool not in policy</td>             <td class="c403">403 tool-not-allowed</td></tr>
+        <tr><td>LLM provider / model denied</td>    <td class="c403">403 llm-not-allowed</td></tr>
+        <tr><td>Graph step out of order</td>        <td class="c403">403 graph_violation</td></tr>
+        <tr><td>Loop limit exceeded</td>            <td class="c429">429 edge_loop_exceeded</td></tr>
+        <tr><td>Token budget exceeded</td>          <td class="c403">403 budget_exceeded</td></tr>
+        <tr><td>Rate limit exceeded</td>            <td class="c403">403 rate-limit-exceeded</td></tr>
+        <tr><td>Redis unavailable</td>              <td class="c503">503 (fail closed)</td></tr>
+        <tr><td>Any addon raises</td>               <td class="c403">deny (fail closed)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ARCHITECTURE TABLE -->
+<section>
+  <div class="wrap">
+    <div class="sec-label">Deployment</div>
+    <h2>Two containers.<br>Full stack.</h2>
+    <p class="sec-intro">The platform container runs the proxy, orchestrator, and Jaeger under supervisord. Redis runs in a sidecar. Remote agents connect over <code>HTTP_PROXY</code> — no shared Docker network required.</p>
+    <table class="arch-table">
+      <thead><tr><th>Process</th><th>Container</th><th>Port</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>redis-stack</td>  <td>amaze-redis</td>    <td>6379</td>            <td>State, counters, streams, timeseries</td></tr>
+        <tr><td>orchestrator</td> <td>amaze-platform</td> <td>8001</td>            <td>Session lifecycle, policy CRUD, audit API</td></tr>
+        <tr><td>proxy</td>        <td>amaze-platform</td> <td>8080</td>            <td>mitmproxy + enforcement addon chain</td></tr>
+        <tr><td>jaeger</td>       <td>amaze-platform</td> <td>16686 / 4317</td>   <td>OTel trace storage + UI</td></tr>
+        <tr><td>ui</td>           <td>amaze-ui</td>       <td>5173</td>            <td>React control dashboard</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="wrap">
+    <h2>Ready to take control<br>of your agents?</h2>
+    <p>Open source. Apache 2.0. No vendor lock-in.</p>
+    <div class="hero-ctas">
+      <a href="https://github.com/chernomaz/aMazeControlPlane" class="btn-primary" target="_blank" rel="noopener">
+        View on GitHub
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+      <a href="#quick-start" class="btn-outline">Quick start</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap">
+    <div class="ft-copy">© 2026 aMaze Control Plane · Apache 2.0</div>
+    <div class="ft-links">
+      <a href="https://github.com/chernomaz/aMazeControlPlane" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/chernomaz/aMazeControlPlane/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      <a href="https://github.com/chernomaz/aMazeControlPlane/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

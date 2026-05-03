@@ -37,7 +37,7 @@ services:
   amaze:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
     ports:
       - "18001:8001"
       - "18080:8080"

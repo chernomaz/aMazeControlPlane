@@ -18,7 +18,7 @@ BASE_IMAGE_PATH="${AMAZE_BASE_IMAGE:-/home/ubuntu/docker-images/amaze-platform-b
 if [ ! -f "$BASE_IMAGE_PATH" ]; then
   echo "ERROR: Base image not found at $BASE_IMAGE_PATH"
   echo "  Either build from scratch (needs internet):"
-  echo "    docker build -f Dockerfile -t amaze-amaze:latest ."
+  echo "    docker build -f docker/Dockerfile -t amaze-amaze:latest ."
   echo "  Or set AMAZE_BASE_IMAGE to the path of the saved tar.gz."
   exit 1
 fi

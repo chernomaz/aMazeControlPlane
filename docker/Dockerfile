@@ -2,7 +2,7 @@
 # supervisord. Built from the repo root; see docker/docker-compose.yml for
 # the runtime wiring (networks, CA volume). Redis runs in its own container.
 #
-#   docker build -f Dockerfile -t amaze/platform:dev .
+#   docker build -f docker/Dockerfile -t amaze/platform:dev .
 
 FROM python:3.12-slim
 
