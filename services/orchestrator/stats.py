@@ -20,7 +20,7 @@ Source-of-truth keys consumed:
   * `ts:{agent_id}:denials`     — 1 per denied request
   * `audit:{agent_id}` / `audit:global`  — full per-call records
 
-Latency is not currently emitted to TS — see TODO at `_empty_latency_series`.
+Latency is emitted to `ts:{agent_id}:llm_latency_ms` by `services/proxy/counters.py`.
 """
 from __future__ import annotations
 
@@ -158,15 +158,23 @@ def _bucketize_sum(samples: list[tuple[int, float]], bounds: list[tuple[int, int
     return out
 
 
-def _empty_latency_series(bounds: list[tuple[int, int]]) -> list[TimePoint]:
-    """Best-effort latency series.
-
-    TODO(S4): we don't currently emit per-call latency to RedisTimeSeries.
-    Until a `ts:{agent_id}:llm_latency_ms` key exists, return zeros so the
-    chart renders without faking values. KPI's `avg_latency_ms` is also
-    None for the same reason.
-    """
-    return [TimePoint(ts=int(start), value=0.0) for start, _ in bounds]
+def _bucketize_avg(samples: list[tuple[int, float]], bounds: list[tuple[int, int]]) -> list[float]:
+    """Average sample values per bucket. Returns 0.0 for empty buckets."""
+    totals = [0.0] * len(bounds)
+    counts = [0] * len(bounds)
+    if not samples or not bounds:
+        return totals
+    first_start = bounds[0][0]
+    bucket_size = bounds[0][1] - bounds[0][0]
+    for ts_ms, val in samples:
+        ts_s = ts_ms // 1000
+        if ts_s < first_start:
+            continue
+        idx = (ts_s - first_start) // bucket_size
+        if 0 <= idx < len(totals):
+            totals[idx] += float(val)
+            counts[idx] += 1
+    return [totals[i] / counts[i] if counts[i] > 0 else 0.0 for i in range(len(bounds))]
 
 
 def _token_bucket(total_tokens: int) -> int | None:
@@ -320,7 +328,16 @@ async def get_dashboard_data(agent_id: str, range_seconds: int) -> DashboardPayl
         calls_over_time.append(TimePoint(ts=int(start), value=float(v)))
         total_calls += int(v)
 
-    latency_per_call = _empty_latency_series(bounds)
+    latency_samples = await _ts_range(r, f"ts:{agent_id}:llm_latency_ms", from_ms, to_ms)
+    latency_per_bucket = _bucketize_avg(latency_samples, bounds)
+    latency_per_call: list[TimePoint] = [
+        TimePoint(ts=int(start), value=latency_per_bucket[i])
+        for i, (start, _) in enumerate(bounds)
+    ]
+    avg_latency_ms: int | None = (
+        int(sum(v for _, v in latency_samples) / len(latency_samples))
+        if latency_samples else None
+    )
 
     # --- 2. Audit-stream walk (per-record breakdowns) ----------------------
     records = await _walk_audit_in_range(agent_id, float(from_s), range_seconds)
@@ -375,9 +392,7 @@ async def get_dashboard_data(agent_id: str, range_seconds: int) -> DashboardPayl
     kpi: KpiCard = {
         "calls": total_calls,
         "unique_tools": len(unique_tools),
-        # TODO(S4): switch to real mean once `ts:{agent_id}:llm_latency_ms`
-        # is emitted by the tracer addon.
-        "avg_latency_ms": None,
+        "avg_latency_ms": avg_latency_ms,
         "critical_alerts": critical_alerts,
         "policy_health": _policy_health(critical_alerts),
         "total_tokens": total_tokens,

@@ -362,7 +362,9 @@ def start_server(
         try:
             await on_startup()
         except Exception as exc:  # noqa: BLE001 — non-fatal; log and continue
+            import traceback
             print(f"[amaze {c.agent_id}] on_startup hook failed: {exc}", flush=True)
+            traceback.print_exc()
 
     async def _serve() -> None:
         chat_config = uvicorn.Config(

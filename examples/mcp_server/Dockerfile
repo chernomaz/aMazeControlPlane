@@ -10,6 +10,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /mcp
 
+# MySQL (MariaDB) — needed by sql_tool.py and seed_mysql.py
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        default-mysql-server \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY examples/mcp_server/requirements.txt /mcp/requirements.txt
 RUN pip install --no-cache-dir -r /mcp/requirements.txt
 

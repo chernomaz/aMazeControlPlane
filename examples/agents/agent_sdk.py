@@ -43,7 +43,7 @@ async def _build_agent():
         system_prompt=(
             "You are a helpful research assistant. "
             "Use the web_search tool ONLY when you need up-to-date "
-            "external facts. Do not call any other tool. "
+            "external facts.  "
             "Always cite sources."
         ),
     )

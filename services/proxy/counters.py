@@ -172,6 +172,15 @@ class Counters:
                     tokens = _parse_llm_tokens(flow)
                     if tokens is not None:
                         await r.ts().add(f"ts:{agent_id}:llm_tokens", "*", tokens)
+                    if (
+                        flow.request.timestamp_start is not None
+                        and flow.response is not None
+                        and flow.response.timestamp_end is not None
+                    ):
+                        latency_ms = int(
+                            (flow.response.timestamp_end - flow.request.timestamp_start) * 1000
+                        )
+                        await r.ts().add(f"ts:{agent_id}:llm_latency_ms", "*", latency_ms)
             except redis.RedisError as e:
                 logger.warning("TS.ADD metric write failed: %s", e)
 

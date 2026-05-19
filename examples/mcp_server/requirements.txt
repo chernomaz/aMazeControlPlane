@@ -15,8 +15,3 @@ langsmith>=0.1
 tavily-python>=0.5
 # sql_tool.py   → MySQL connector
 mysql-connector-python>=9.0
-# pdf_tool.py   → PDF loader + splitter + embeddings/store
-pypdf>=5.0
-langchain-community>=0.3,<1
-langchain-text-splitters>=0.3,<1
-langchain-chroma>=0.1
