@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { DebuggerPanel } from './AgentDebugger'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   approveAgent,
@@ -17,7 +18,7 @@ import { DonutChart } from '@/components/DonutChart'
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Toast { id: number; msg: string; kind: 'success' | 'error' }
-type Subtab = 'dashboard' | 'policy'
+type Subtab = 'dashboard' | 'policy' | 'debugger'
 type TimeRange = '1h' | '24h' | '7d'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -329,6 +330,14 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
             </span>
           )}
         </button>
+        <button style={tabStyle('debugger')} onClick={() => setSubtab('debugger')}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="6"/>
+            <line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
+            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+          </svg>
+          Debugger
+        </button>
       </div>
 
       {/* ── Dashboard ── */}
@@ -530,6 +539,11 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
             </table>
           </div>
         </div>
+      )}
+
+      {/* ── Debugger ── */}
+      {subtab === 'debugger' && (
+        <DebuggerPanel embedded agentId={agent.agent_id} />
       )}
 
       {/* ── Policy ── */}

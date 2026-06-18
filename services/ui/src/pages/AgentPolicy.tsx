@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 
@@ -92,6 +92,7 @@ function isEqual(a: unknown, b: unknown): boolean {
 export default function AgentPolicy() {
   const { agentId = '' } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -282,14 +283,13 @@ export default function AgentPolicy() {
   return (
     <div style={{ paddingBottom: 88 /* leave room for sticky save bar */ }}>
       {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
         <Button variant="ghost" size="sm" onClick={() => navigate('/agents')} style={{ gap: 6 }}>
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> Agents
         </Button>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.3px' }}>
-            Policy ·{' '}
-            <span style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace', color: 'var(--blue)' }}>
+            <span style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>
               {agentId}
             </span>
           </h1>
@@ -297,6 +297,32 @@ export default function AgentPolicy() {
             Edits go straight to Redis. Policies are picked up on the next proxy request — no restart.
           </p>
         </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', marginBottom: 24 }}>
+        {[
+          { label: 'Dashboard', path: `/agents/${encodeURIComponent(agentId)}` },
+          { label: 'Policy',    path: `/agents/${encodeURIComponent(agentId)}/policy` },
+          { label: 'Debugger',  path: `/agents/${encodeURIComponent(agentId)}/debugger` },
+        ].map((tab) => {
+          const active = location.pathname === tab.path
+          return (
+            <button
+              key={tab.path}
+              onClick={() => navigate(tab.path)}
+              style={{
+                padding: '9px 22px', fontSize: 13, fontWeight: 600,
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                color: active ? 'var(--blue)' : 'var(--muted-raw)',
+                borderBottom: `2px solid ${active ? 'var(--blue)' : 'transparent'}`,
+                marginBottom: -1,
+              }}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
       </div>
 
       {/* Card 1: Enforcement Mode */}

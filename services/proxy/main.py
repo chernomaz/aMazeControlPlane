@@ -42,6 +42,7 @@ from mitmproxy import http
 
 from services.proxy.audit_log import AuditLog
 from services.proxy.counters import Counters
+from services.proxy.debug_pauser import DebugPauser
 from services.proxy.deny import deny
 from services.proxy.enforcer import PolicyEnforcer
 from services.proxy.graph_enforcer import GraphEnforcer
@@ -120,6 +121,7 @@ addons = [
     FailClosed(Tracer(), "tracer"),
     FailClosed(PolicyEnforcer(), "enforcer"),
     FailClosed(GraphEnforcer(), "graph"),
+    FailClosed(DebugPauser(), "debug_pauser"),
     FailClosed(StreamBlocker(), "stream_blocker"),
     FailClosed(Counters(), "counters"),
     FailClosed(AuditLog(), "audit_log"),

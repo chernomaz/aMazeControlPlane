@@ -9,6 +9,7 @@ import McpServers from './pages/McpServers'
 import Agents from './pages/Agents'
 import AgentPolicy from './pages/AgentPolicy'
 import AgentDashboard from './pages/AgentDashboard'
+import AgentDebugger from './pages/AgentDebugger'
 import Traces from './pages/Traces'
 import TraceDetail from './pages/TraceDetail'
 import Alerts from './pages/Alerts'
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: 'agents', element: <Agents /> },
       { path: 'agents/:agentId', element: <AgentDashboard /> },
       { path: 'agents/:agentId/policy', element: <AgentPolicy /> },
+      { path: 'agents/:agentId/debugger', element: <AgentDebugger /> },
       { path: 'traces', element: <Traces /> },
       { path: 'traces/:traceId', element: <TraceDetail /> },
       { path: 'alerts', element: <Alerts /> },

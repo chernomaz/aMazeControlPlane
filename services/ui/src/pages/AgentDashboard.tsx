@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Send } from 'lucide-react'
 
@@ -254,6 +254,7 @@ function extractReply(response: unknown): string {
 export default function AgentDashboard() {
   const { agentId = '' } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
 
   const [range, setRange] = useState<StatsRange>('24h')
@@ -419,12 +420,47 @@ export default function AgentDashboard() {
             size="sm"
             variant="ghost"
             onClick={() =>
+              navigate(`/agents/${encodeURIComponent(agentId)}/debugger`)
+            }
+          >
+            Debugger
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
               navigate(`/agents/${encodeURIComponent(agentId)}/policy`)
             }
           >
             Edit Policy
           </Button>
         </div>
+      </div>
+
+      {/* ── Tab bar ────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', marginBottom: 20 }}>
+        {[
+          { label: 'Dashboard', path: `/agents/${encodeURIComponent(agentId)}` },
+          { label: 'Policy',    path: `/agents/${encodeURIComponent(agentId)}/policy` },
+          { label: 'Debugger',  path: `/agents/${encodeURIComponent(agentId)}/debugger` },
+        ].map((tab) => {
+          const active = location.pathname === tab.path
+          return (
+            <button
+              key={tab.path}
+              onClick={() => navigate(tab.path)}
+              style={{
+                padding: '9px 22px', fontSize: 13, fontWeight: 600,
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                color: active ? 'var(--blue)' : 'var(--muted-raw)',
+                borderBottom: `2px solid ${active ? 'var(--blue)' : 'transparent'}`,
+                marginBottom: -1,
+              }}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
       </div>
 
       {statsQ.isError && (

@@ -443,8 +443,18 @@ async def send_message(
     # sdk/amaze/_a2a.py:156); pass the user prompt verbatim under that key.
     payload = {"message": body.prompt}
 
+    # Extend the timeout when the agent is in debug (step-through) mode —
+    # each step waits for the user to press Next, so the full run can take
+    # several minutes. The UI fires this call without waiting for the reply,
+    # so a long timeout here doesn't block any client.
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        debug_enabled = await r.exists(f"debug:{agent_id}:enabled")
+    except Exception:  # noqa: BLE001 — best-effort; fall back to short timeout
+        debug_enabled = False
+    agent_timeout = 3600.0 if debug_enabled else 60.0
+
+    try:
+        async with httpx.AsyncClient(timeout=agent_timeout) as client:
             resp = await client.post(url, json=payload)
     except httpx.TimeoutException as e:
         logger.warning("send_message: %s timeout to %s: %s", agent_id, url, e)

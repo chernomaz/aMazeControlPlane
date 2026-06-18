@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from services.orchestrator.routers import agents as agents_router
 from services.orchestrator.routers import alerts as alerts_router
+from services.orchestrator.routers import debugger as debugger_router
 from services.orchestrator.routers import export as export_router
 from services.orchestrator.routers import llms as llms_router
 from services.orchestrator.routers import mcp as mcp_router
@@ -115,6 +116,7 @@ app = FastAPI(title="aMaze Orchestrator", version="0.1.0", lifespan=_lifespan)
 # S4-T1.2 — read-only GUI endpoints. Each lives in its own router module;
 # main.py keeps /health, /register and /resolve/* (Phase 2 will move them).
 app.include_router(agents_router.router)
+app.include_router(debugger_router.router)
 app.include_router(mcp_router.router)
 app.include_router(llms_router.router)
 app.include_router(traces_router.router)
