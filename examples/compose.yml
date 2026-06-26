@@ -122,6 +122,10 @@ services:
         condition: service_started
     volumes:
       - amaze-proxy-ca:/etc/amaze/ca:ro
+      # Persist MySQL data so the DB is initialized + seeded only on first
+      # boot. Later restarts skip init/seed (entrypoint guards on the data
+      # dir + a non-empty users table), so the MCP server comes up fast.
+      - demo-mcp-mysql:/var/lib/mysql
     ports:
       - "8000:8000"     # proxy reaches this via host.docker.internal:8000
     environment:
@@ -133,3 +137,7 @@ services:
       AMAZE_MCP_URL: http://${AMAZE_PROXY_HOST:-host.docker.internal}:8000/mcp
       AMAZE_REGISTER_RETRIES: "20"
       AMAZE_REGISTER_DELAY: "3"
+
+volumes:
+  # Persisted MySQL data dir for demo-mcp — keeps the seed a one-time cost.
+  demo-mcp-mysql:
