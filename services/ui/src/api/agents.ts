@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, getDebugUserId } from './client'
 
 export type AgentState = 'pending' | 'approved-no-policy' | 'approved-with-policy'
 
@@ -63,11 +63,17 @@ export function removeAgent(agentId: string) {
 }
 
 export function sendAgentMessage(agentId: string, prompt: string) {
+  // Carry the per-browser debug user id so that, when this browser has the
+  // debugger open for the agent, the agent's outbound calls for THIS message
+  // are tagged and parked under this user's queue (debug:{agent}:{user}:*).
+  // Harmless for non-debug sends: the proxy only parks when the user has an
+  // active debug:{agent}:{user}:enabled flag.
   return apiFetch<SendMessageResponse>(
     `/agents/${encodeURIComponent(agentId)}/messages`,
     {
       method: 'POST',
       body: JSON.stringify({ prompt }),
+      headers: { 'X-Amaze-Debug-User': getDebugUserId() },
     },
   )
 }

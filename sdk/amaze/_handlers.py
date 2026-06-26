@@ -15,6 +15,7 @@ blocking SDKs without forcing authors to rewrite their code).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any, Callable
 
 _user_handler: Callable[..., Any] | None = None
@@ -66,5 +67,6 @@ async def _dispatch(fn: Callable[..., Any], *args: Any) -> Any:
         result = await fn(*args)
     else:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, fn, *args)
+        ctx = contextvars.copy_context()
+        result = await loop.run_in_executor(None, lambda: ctx.run(fn, *args))
     return result if result is not None else ""

@@ -9,8 +9,12 @@ export class ApiError extends Error {
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    // Spread options FIRST, then set the merged headers LAST — otherwise
+    // `...options` would re-introduce options.headers and clobber the
+    // Content-Type default (any caller passing custom headers, e.g. the debug
+    // X-Amaze-Debug-User, would otherwise send the body as text/plain → 422).
     ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
   if (res.status === 204) return undefined as T
   if (!res.ok) {
@@ -24,6 +28,26 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     throw new ApiError(res.status, msg)
   }
   return res.json()
+}
+
+const DEBUG_USER_KEY = 'amaze_debug_user'
+
+/**
+ * Stable per-browser debug user id. Generated once and persisted in
+ * localStorage so each browser gets its own isolated debugger session —
+ * multiple users can step-debug the SAME agent independently. Sent as the
+ * `X-Amaze-Debug-User` header on the debug endpoints and send-message.
+ */
+export function getDebugUserId(): string {
+  let id = localStorage.getItem(DEBUG_USER_KEY)
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `u-${Math.random().toString(36).slice(2)}-${Date.now()}`
+    localStorage.setItem(DEBUG_USER_KEY, id)
+  }
+  return id
 }
 
 export function getWsUrl(sessionId: string) {

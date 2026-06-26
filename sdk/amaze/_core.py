@@ -9,6 +9,7 @@ one bearer, one proxy.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import tempfile
@@ -40,6 +41,14 @@ class Config:
 
 _config = Config()
 
+# Per-browser debug user id, propagated from the UI through the agent runtime
+# onto outbound HTTP calls so the proxy can park each intercepted step under
+# the right user's queue. Read at REQUEST time by the httpx hooks (like the
+# bearer). Unset (None) on the common production path → no header is added.
+_debug_user: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "amaze_debug_user", default=None
+)
+
 
 def _install_httpx_bearer_injector() -> None:
     """Patch httpx.Client / AsyncClient so every outbound request carries
@@ -63,12 +72,18 @@ def _install_httpx_bearer_injector() -> None:
             token = _config.bearer_token
         if token:
             request.headers["X-Amaze-Bearer"] = token
+        debug_user = _debug_user.get()
+        if debug_user:
+            request.headers["X-Amaze-Debug-User"] = debug_user
 
     async def _inject_async(request: "httpx.Request") -> None:
         with _config._lock:
             token = _config.bearer_token
         if token:
             request.headers["X-Amaze-Bearer"] = token
+        debug_user = _debug_user.get()
+        if debug_user:
+            request.headers["X-Amaze-Debug-User"] = debug_user
 
     def _wrap(cls, hook):
         orig = cls.__init__

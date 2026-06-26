@@ -20,6 +20,7 @@ Failure paths deny with stable reason codes:
 from __future__ import annotations
 
 import logging
+import re
 
 import redis.asyncio as redis
 from mitmproxy import http
@@ -28,6 +29,11 @@ from services.proxy._redis import client as redis_client
 from services.proxy.deny import deny
 
 logger = logging.getLogger(__name__)
+
+# Debug-user ids are client-supplied and get interpolated into debug:* Redis
+# key names by the debug_pauser. Constrain to a safe charset/length (UUIDs from
+# the UI pass); anything else is treated as "no user" → never parked (fail safe).
+_DEBUG_USER_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Hostnames that bypass bearer resolution. `amaze` is the compose DNS name
 # for the platform container — siblings hit `http://amaze:8001/register`
@@ -39,12 +45,24 @@ class SessionIdentity:
     async def request(self, flow: http.HTTPFlow) -> None:
         # Capture bearer BEFORE stripping so we can still resolve it.
         bearer = flow.request.headers.get("X-Amaze-Bearer", "").strip()
+        # Capture the debug-user the same way — read before the scrub so a
+        # sibling addon (enforcer) can re-inject it for A2A peers only.
+        debug_user = flow.request.headers.get("X-Amaze-Debug-User", "").strip()
 
         # Unconditional scrub — upstream NEVER sees these, regardless of
         # which branch we exit on. Covers C1 (bearer leak on bypass path)
         # and the pre-existing x-amaze-caller spoof-prevention.
         flow.request.headers.pop("x-amaze-caller", None)
         flow.request.headers.pop("X-Amaze-Bearer", None)
+        flow.request.headers.pop("X-Amaze-Debug-User", None)
+
+        # Stash unconditionally so every downstream addon sees it on all
+        # paths (bypass, deny, success). None when the header was absent or
+        # not a safe id — an unsafe value is dropped (never parked) rather than
+        # used to build a malformed/colliding debug key.
+        flow.metadata["amaze_debug_user"] = (
+            debug_user if _DEBUG_USER_RE.match(debug_user) else None
+        )
 
         if flow.request.host in _BEARER_BYPASS_HOSTS:
             flow.metadata["amaze_bypass"] = True

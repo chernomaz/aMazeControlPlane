@@ -168,6 +168,9 @@ class PolicyEnforcer:
             flow.metadata["amaze_kind"] = "a2a"
             flow.metadata["amaze_target"] = host
             self._inject_caller(flow, agent_id)
+            # Re-inject the debug-user header for A2A only, so the receiving
+            # peer agent's SDK can continue the same user's debug session.
+            self._inject_debug_user(flow)
             # Per-turn agent-call budget pre-check
             await self._check_per_turn_limit(
                 flow, policy,
@@ -186,6 +189,15 @@ class PolicyEnforcer:
         """Set the trusted x-amaze-caller header. Overwrites any prior value
         (which SessionIdentity already stripped)."""
         flow.request.headers["x-amaze-caller"] = agent_id
+
+    def _inject_debug_user(self, flow: http.HTTPFlow) -> None:
+        """Re-inject the debug-user header for A2A calls only, so the receiving
+        peer agent's SDK can continue the same user's debug session. The header
+        was stripped from upstream by SessionIdentity; we only restore it here
+        for peer-agent traffic — never for llm / mcp / passthrough upstreams."""
+        debug_user = flow.metadata.get("amaze_debug_user")
+        if debug_user:
+            flow.request.headers["X-Amaze-Debug-User"] = debug_user
 
     async def _lookup_mcp(self, host: str) -> dict | None:
         """Return mcp:{host} payload from Redis, None if unregistered,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import json
 import threading
 from http import HTTPStatus
@@ -53,10 +54,20 @@ def send_sync(target: str, message: Any) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        # No running loop — we're in the calling thread/context, so the
+        # debug-user contextvar (if set) is inherited by the task asyncio.run
+        # creates. Nothing extra needed.
         return asyncio.run(send_async(target, message))
     # Inside a running loop — fork a dedicated thread so we don't collide.
+    # The worker thread starts with an EMPTY context, so we must copy the
+    # current context across the hop; otherwise send_async would read an unset
+    # _debug_user and stamp no X-Amaze-Debug-User (breaking A2A debug routing).
+    # ctx.run wraps asyncio.run so the task it creates inherits the copied ctx.
+    ctx = contextvars.copy_context()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(send_async(target, message))).result()
+        return pool.submit(
+            lambda: ctx.run(asyncio.run, send_async(target, message))
+        ).result()
 
 
 def _encode_part(value: Any) -> dict:
@@ -110,6 +121,15 @@ async def send_async(target: str, message: Any) -> Any:
     if not token:
         raise SendError(0, "no-bearer", "SDK registered without a bearer token")
     headers["X-Amaze-Bearer"] = token
+    # Debug-user propagation for A2A. The httpx event-hook injector (used for
+    # LLM/MCP) reads the contextvar, but send_sync may hop threads
+    # (`asyncio.run` in a ThreadPoolExecutor) where that contextvar would be
+    # lost — so A2A stamps the header explicitly from the value captured in
+    # the calling context. The proxy re-injects it onto the peer's inbound
+    # request so the peer continues the same user's debug session.
+    du = _core._debug_user.get()
+    if du:
+        headers["X-Amaze-Debug-User"] = du
 
     async with httpx.AsyncClient(timeout=30, proxy=c.proxy_url) as client:
         resp = await client.post(url, json=payload, headers=headers)
@@ -177,6 +197,11 @@ def _chat_app(ready: threading.Event) -> FastAPI:
                 status_code=HTTPStatus.BAD_REQUEST,
             )
         msg = body.get("message", "")
+        # Bind the debug-user contextvar for the duration of handling this
+        # message so outbound LLM/MCP/A2A calls made by the user handler
+        # inherit it (the handler is async, so the contextvar propagates to
+        # awaited calls automatically). No header → None → never parked.
+        token = _core._debug_user.set(req.headers.get("X-Amaze-Debug-User") or None)
         try:
             reply = await _handlers.call_user_handler(msg)
         except _handlers.HandlerMissing as e:
@@ -184,6 +209,8 @@ def _chat_app(ready: threading.Event) -> FastAPI:
                 {"error": "handler-missing", "detail": str(e)},
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             )
+        finally:
+            _core._debug_user.reset(token)
         return JSONResponse({"reply": reply})
 
     return app
@@ -304,6 +331,12 @@ def _a2a_app(ready: threading.Event) -> FastAPI:
             )
         caller_id = caller_raw
 
+        # Continue the originating user's debug session: the proxy re-injects
+        # X-Amaze-Debug-User onto this inbound A2A request, so bind it for the
+        # duration of the peer handler call. The handler is async, so the
+        # contextvar propagates to its awaited outbound calls. No header →
+        # None → never parked.
+        du_token = _core._debug_user.set(req.headers.get("X-Amaze-Debug-User") or None)
         try:
             reply = await _handlers.call_agent_handler(caller_id, text)
         except _handlers.HandlerMissing as e:
@@ -314,6 +347,8 @@ def _a2a_app(ready: threading.Event) -> FastAPI:
                     "error": {"code": -32000, "message": f"handler-missing: {e}"},
                 }
             )
+        finally:
+            _core._debug_user.reset(du_token)
 
         return JSONResponse(
             {

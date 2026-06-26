@@ -6,26 +6,32 @@ Endpoints (all under /agents/{agent_id}/debug):
   POST /agents/{agent_id}/debug/next       - advance past the current step
   POST /agents/{agent_id}/debug/skip-all  - release all queued steps at once
 
+Every debugger key carries a per-user segment ":{user}" right after the
+agent id, so concurrent users debugging the same agent never collide. The
+user is read from the X-Amaze-Debug-User request header; an untagged request
+has no user and is rejected with 400.
+
 Redis keyspace:
-  debug:{agent_id}:enabled          STRING  "1"  (ENABLED_TTL)
-  debug:{agent_id}:skip_mode        STRING  "1"  (SKIP_TTL)
-  debug:{agent_id}:queue            LIST    [step_id, ...]
-  debug:{agent_id}:step:{step_id}   HASH    step metadata   (STEP_TTL)
-  debug:{agent_id}:gate:{step_id}   LIST    ["continue"]    (GATE_TTL)
-  debug:{agent_id}:step:{step_id}:override  STRING  override_value  (OVERRIDE_TTL)
+  debug:{agent_id}:{user}:enabled          STRING  "1"  (ENABLED_TTL)
+  debug:{agent_id}:{user}:skip_mode        STRING  "1"  (SKIP_TTL)
+  debug:{agent_id}:{user}:queue            LIST    [step_id, ...]
+  debug:{agent_id}:{user}:step:{step_id}   HASH    step metadata   (STEP_TTL)
+  debug:{agent_id}:{user}:gate:{step_id}   LIST    ["continue"]    (GATE_TTL)
+  debug:{agent_id}:{user}:step:{step_id}:override  STRING  override_value  (OVERRIDE_TTL)
 
 Peer-agent propagation (A2A sub-agents):
-  debug:{peer_id}:primary_agent     STRING  primary_agent_id  (ENABLED_TTL)
+  debug:{peer_id}:{user}:primary_agent     STRING  primary_agent_id  (ENABLED_TTL)
 
   When debug is enabled for primary agent P, each of its allowed_agents peers
-  gets `debug:{peer}:primary_agent = P`.  The proxy debug_pauser reads this key
-  and routes the peer's steps into P's history/queue instead of its own.
-  The primary's enabled key is refreshed by UI polling; the primary_agent keys
-  on peers are refreshed at the same time so they share the same TTL.
+  gets `debug:{peer}:{user}:primary_agent = P`.  The proxy debug_pauser reads
+  this key and routes the peer's steps into P's history/queue instead of its
+  own. The primary's enabled key is refreshed by UI polling; the primary_agent
+  keys on peers are refreshed at the same time so they share the same TTL.
 """
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import redis.asyncio as redis
@@ -58,6 +64,29 @@ class NextStepBody(BaseModel):
     override: str | None = None
 
 
+# --- Helpers -----------------------------------------------------------------
+
+# Debug-user ids are client-supplied and interpolated into Redis key names, so
+# constrain them to a safe charset/length (UUIDs from the UI pass). This keeps
+# the debug:* keyspace well-formed and prevents header-crafted key pollution.
+_DEBUG_USER_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _debug_user(request: Request) -> str:
+    """Extract + validate the debugging user from the request headers.
+
+    Every debugger key is scoped per-user. An untagged request (missing the
+    X-Amaze-Debug-User header) has no user and is rejected with 400; a value
+    that isn't a safe id (charset/length) is rejected the same way.
+    """
+    user = request.headers.get("x-amaze-debug-user", "").strip()
+    if not user:
+        raise HTTPException(status_code=400, detail="debug-user-required")
+    if not _DEBUG_USER_RE.match(user):
+        raise HTTPException(status_code=400, detail="debug-user-invalid")
+    return user
+
+
 # --- Endpoints ---------------------------------------------------------------
 
 @router.put("/agents/{agent_id}/debug")
@@ -71,6 +100,7 @@ async def set_debug(
     dead-man's switch: if the UI disappears, polling stops, the key expires,
     and the proxy stops intercepting within ENABLED_TTL seconds.
     """
+    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
 
     # Resolve peer agents from the primary's policy so we can propagate debug.
@@ -82,24 +112,29 @@ async def set_debug(
 
     try:
         if body.enabled:
-            await r.setex(f"debug:{agent_id}:enabled", ENABLED_TTL, "1")
-            # Reset history and queue for a fresh session.
+            await r.setex(f"debug:{agent_id}:{user}:enabled", ENABLED_TTL, "1")
+            # Reset history, queue, AND skip_mode for a fresh session — a stale
+            # skip_mode (from a prior Skip All, 300 s TTL) would otherwise make
+            # the proxy pass everything through and the new session never pause.
             await r.delete(
-                f"debug:{agent_id}:history",
-                f"debug:{agent_id}:queue",
+                f"debug:{agent_id}:{user}:history",
+                f"debug:{agent_id}:{user}:queue",
+                f"debug:{agent_id}:{user}:skip_mode",
             )
             # Propagate to peer agents so their internal calls (LLM, MCP) are
             # also intercepted and routed into the primary's history/queue.
             for peer_id in peer_ids:
-                await r.setex(f"debug:{peer_id}:primary_agent", ENABLED_TTL, agent_id)
+                await r.setex(
+                    f"debug:{peer_id}:{user}:primary_agent", ENABLED_TTL, agent_id
+                )
         else:
             await r.delete(
-                f"debug:{agent_id}:enabled",
-                f"debug:{agent_id}:skip_mode",
+                f"debug:{agent_id}:{user}:enabled",
+                f"debug:{agent_id}:{user}:skip_mode",
             )
             # Clear peer routing keys.
             for peer_id in peer_ids:
-                await r.delete(f"debug:{peer_id}:primary_agent")
+                await r.delete(f"debug:{peer_id}:{user}:primary_agent")
     except redis.RedisError as e:
         logger.error("debugger set_debug: redis error for %s: %s", agent_id, e)
         raise HTTPException(status_code=503, detail="redis-unavailable") from e
@@ -116,43 +151,44 @@ async def get_current(
     Polling this endpoint refreshes the enabled key (keepalive). If the UI
     goes away the key expires and the proxy stops intercepting.
     """
+    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
     try:
         # Keepalive: refresh TTL on the enabled flag AND all peer routing keys
         # so that peer agents don't lose their primary_agent binding while the
         # session is active.
-        enabled = await r.exists(f"debug:{agent_id}:enabled")
+        enabled = await r.exists(f"debug:{agent_id}:{user}:enabled")
         if enabled:
-            await r.expire(f"debug:{agent_id}:enabled", ENABLED_TTL)
+            await r.expire(f"debug:{agent_id}:{user}:enabled", ENABLED_TTL)
             try:
                 policy = await policy_store.get_policy(agent_id)
                 for peer_id in (list(policy.allowed_agents) if policy else []):
-                    await r.expire(f"debug:{peer_id}:primary_agent", ENABLED_TTL)
+                    await r.expire(f"debug:{peer_id}:{user}:primary_agent", ENABLED_TTL)
             except Exception:  # noqa: BLE001 — best effort
                 pass
 
         # Always read the full history first — persistent list that grows as
         # steps arrive and never shrinks. This keeps the sequence diagram
         # populated even after steps are continued (removed from the queue).
-        all_ids: list[str] = await r.lrange(f"debug:{agent_id}:history", 0, -1)
+        all_ids: list[str] = await r.lrange(f"debug:{agent_id}:{user}:history", 0, -1)
         history: list[dict[str, Any]] = []
         for hid in all_ids:
-            entry = await r.hgetall(f"debug:{agent_id}:step:{hid}")
+            entry = await r.hgetall(f"debug:{agent_id}:{user}:step:{hid}")
             if entry:
                 history.append(dict(entry))
 
         # Peek at the head of the queue without consuming it.
-        step_id: str | None = await r.lindex(f"debug:{agent_id}:queue", 0)
+        step_id: str | None = await r.lindex(f"debug:{agent_id}:{user}:queue", 0)
         if not step_id:
             return {"paused": False, "step": None, "history": history}
 
         # Fetch the step metadata hash.
         step_data: dict[str, str] = await r.hgetall(
-            f"debug:{agent_id}:step:{step_id}"
+            f"debug:{agent_id}:{user}:step:{step_id}"
         )
         if not step_data:
             # Step expired while it was in the queue — discard and report idle.
-            await r.lpop(f"debug:{agent_id}:queue")
+            await r.lpop(f"debug:{agent_id}:{user}:queue")
             return {"paused": False, "step": None, "history": history}
 
         return {
@@ -176,23 +212,24 @@ async def advance_next(
     double-advancing on stale UI state), optionally records an override value
     for the proxy to read, pops the step, and pushes the gate signal.
     """
+    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
     try:
-        head: str | None = await r.lindex(f"debug:{agent_id}:queue", 0)
+        head: str | None = await r.lindex(f"debug:{agent_id}:{user}:queue", 0)
         if head != body.step_id:
             # Either already advanced or a different step is at the front.
             raise HTTPException(status_code=409, detail="step-already-advanced")
 
         if body.override is not None:
             await r.setex(
-                f"debug:{agent_id}:step:{body.step_id}:override",
+                f"debug:{agent_id}:{user}:step:{body.step_id}:override",
                 OVERRIDE_TTL,
                 body.override,
             )
 
-        await r.lpop(f"debug:{agent_id}:queue")
+        await r.lpop(f"debug:{agent_id}:{user}:queue")
 
-        gate_key = f"debug:{agent_id}:gate:{body.step_id}"
+        gate_key = f"debug:{agent_id}:{user}:gate:{body.step_id}"
         await r.rpush(gate_key, "continue")
         await r.expire(gate_key, GATE_TTL)
 
@@ -214,16 +251,17 @@ async def skip_all(
     Skip-mode tells the proxy to pass future steps through immediately
     without parking them, until the SKIP_TTL expires or debug is disabled.
     """
+    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
     count = 0
     try:
-        await r.setex(f"debug:{agent_id}:skip_mode", SKIP_TTL, "1")
+        await r.setex(f"debug:{agent_id}:{user}:skip_mode", SKIP_TTL, "1")
 
         while True:
-            step_id: str | None = await r.lpop(f"debug:{agent_id}:queue")
+            step_id: str | None = await r.lpop(f"debug:{agent_id}:{user}:queue")
             if step_id is None:
                 break
-            gate_key = f"debug:{agent_id}:gate:{step_id}"
+            gate_key = f"debug:{agent_id}:{user}:gate:{step_id}"
             await r.rpush(gate_key, "continue")
             await r.expire(gate_key, GATE_TTL)
             count += 1

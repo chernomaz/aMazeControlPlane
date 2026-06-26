@@ -17,13 +17,13 @@ Request interception sequence:
 
 Response interception: same pattern; on browser-gone, resume with original response.
 
-Redis keys:
-  debug:{agent_id}:enabled             STRING  90 s   debug mode flag (keepalive by UI)
-  debug:{agent_id}:skip_mode           STRING  300 s  skip-all flag
-  debug:{agent_id}:step:{step_id}      HASH    600 s  step data
-  debug:{agent_id}:queue               LIST    600 s  step_ids in order
-  debug:{agent_id}:gate:{step_id}      LIST    30 s   BLPOP gate (short TTL — consumed fast)
-  debug:{agent_id}:step:{step_id}:override  STRING  300 s  user-edited body
+Redis keys (per-user namespaced — {user} from flow.metadata["amaze_debug_user"]):
+  debug:{agent_id}:{user}:enabled             STRING  90 s   debug mode flag (keepalive by UI)
+  debug:{agent_id}:{user}:skip_mode           STRING  300 s  skip-all flag
+  debug:{agent_id}:{user}:step:{step_id}      HASH    600 s  step data
+  debug:{agent_id}:{user}:queue               LIST    600 s  step_ids in order
+  debug:{agent_id}:{user}:gate:{step_id}      LIST    30 s   BLPOP gate (short TTL — consumed fast)
+  debug:{agent_id}:{user}:step:{step_id}:override  STRING  300 s  user-edited body
 """
 from __future__ import annotations
 
@@ -53,19 +53,19 @@ def _build_target(flow: http.HTTPFlow) -> str:
     return flow.request.pretty_host or ""
 
 
-async def _resolve_primary(r, agent_id: str) -> tuple[str, str, str]:
-    """Return (primary_id, enabled_key, skip_key) for the given agent.
+async def _resolve_primary(r, agent_id: str, user: str) -> tuple[str, str, str]:
+    """Return (primary_id, enabled_key, skip_key) for the given agent + user.
 
-    If this agent is a peer (has debug:{agent_id}:primary_agent set), its steps
-    are routed into the primary's history/queue.  The primary's enabled and
-    skip_mode keys are used for all gating decisions.
+    If this agent is a peer (has debug:{agent_id}:{user}:primary_agent set), its
+    steps are routed into the primary's history/queue.  The primary's enabled
+    and skip_mode keys are used for all gating decisions.
     """
-    raw = await r.get(f"debug:{agent_id}:primary_agent")
+    raw = await r.get(f"debug:{agent_id}:{user}:primary_agent")
     if raw:
         primary_id = raw.decode("utf-8") if isinstance(raw, bytes) else raw
     else:
         primary_id = agent_id
-    return primary_id, f"debug:{primary_id}:enabled", f"debug:{primary_id}:skip_mode"
+    return primary_id, f"debug:{primary_id}:{user}:enabled", f"debug:{primary_id}:{user}:skip_mode"
 
 
 async def _poll_gate(r, gate_key: str, enabled_key: str) -> bool:
@@ -93,10 +93,14 @@ class DebugPauser:
         if not agent_id:
             return
 
+        user = flow.metadata.get("amaze_debug_user")
+        if not user:
+            return  # untagged calls are never parked — do no Redis work
+
         r = await redis_client()
 
         # Resolve the primary agent: peers route into the primary's session.
-        primary_id, enabled_key, skip_key = await _resolve_primary(r, agent_id)
+        primary_id, enabled_key, skip_key = await _resolve_primary(r, agent_id, user)
 
         if not await r.exists(enabled_key):
             return  # fast path — zero overhead when debug is off
@@ -119,11 +123,11 @@ class DebugPauser:
         body         = (flow.request.content or b"")[:BODY_LIMIT].decode("utf-8", errors="replace")
         # Store step metadata and gate under the PRIMARY's namespace so the UI
         # can find them via a single history/queue key.
-        step_key     = f"debug:{primary_id}:step:{step_id}"
-        queue_key    = f"debug:{primary_id}:queue"
-        hist_key     = f"debug:{primary_id}:history"
-        gate_key     = f"debug:{primary_id}:gate:{step_id}"
-        override_key = f"debug:{primary_id}:step:{step_id}:override"
+        step_key     = f"debug:{primary_id}:{user}:step:{step_id}"
+        queue_key    = f"debug:{primary_id}:{user}:queue"
+        hist_key     = f"debug:{primary_id}:{user}:history"
+        gate_key     = f"debug:{primary_id}:{user}:gate:{step_id}"
+        override_key = f"debug:{primary_id}:{user}:step:{step_id}:override"
 
         await r.hset(step_key, mapping={
             "step_id": step_id,
@@ -237,9 +241,13 @@ class DebugPauser:
         if not agent_id:
             return
 
+        user = flow.metadata.get("amaze_debug_user")
+        if not user:
+            return  # untagged calls are never parked — do no Redis work
+
         r = await redis_client()
 
-        primary_id, enabled_key, skip_key = await _resolve_primary(r, agent_id)
+        primary_id, enabled_key, skip_key = await _resolve_primary(r, agent_id, user)
 
         if not await r.exists(enabled_key):
             return
@@ -264,7 +272,7 @@ class DebugPauser:
         if "text/event-stream" in ct:
             if kind == "mcp" and tool:
                 sse_target   = _build_target(flow)
-                sse_hist_key = f"debug:{primary_id}:history"
+                sse_hist_key = f"debug:{primary_id}:{user}:history"
                 raw = (flow.response.content or b"")[:BODY_LIMIT].decode("utf-8", errors="replace")
                 # SSE frames look like "data: <json>\n\n" — extract last data line.
                 data_lines = [
@@ -274,7 +282,7 @@ class DebugPauser:
                 ]
                 parsed_body = data_lines[-1] if data_lines else raw
                 sse_step_id  = str(uuid.uuid4())
-                sse_step_key = f"debug:{primary_id}:step:{sse_step_id}"
+                sse_step_key = f"debug:{primary_id}:{user}:step:{sse_step_id}"
                 await r.hset(sse_step_key, mapping={
                     "step_id": sse_step_id,
                     "agent":   agent_id,
@@ -297,11 +305,11 @@ class DebugPauser:
         step_id      = str(uuid.uuid4())
         target       = _build_target(flow)
         body         = (flow.response.content or b"")[:BODY_LIMIT].decode("utf-8", errors="replace")
-        step_key     = f"debug:{primary_id}:step:{step_id}"
-        queue_key    = f"debug:{primary_id}:queue"
-        hist_key     = f"debug:{primary_id}:history"
-        gate_key     = f"debug:{primary_id}:gate:{step_id}"
-        override_key = f"debug:{primary_id}:step:{step_id}:override"
+        step_key     = f"debug:{primary_id}:{user}:step:{step_id}"
+        queue_key    = f"debug:{primary_id}:{user}:queue"
+        hist_key     = f"debug:{primary_id}:{user}:history"
+        gate_key     = f"debug:{primary_id}:{user}:gate:{step_id}"
+        override_key = f"debug:{primary_id}:{user}:step:{step_id}:override"
 
         await r.hset(step_key, mapping={
             "step_id": step_id,

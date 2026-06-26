@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -38,6 +39,11 @@ from services.proxy import policy_store
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Safe charset/length for the client-supplied debug-user id (UUIDs from the UI
+# pass). Mirrors the check in routers/debugger.py and proxy/session.py so a
+# crafted X-Amaze-Debug-User can't build a malformed debug:* key.
+_DEBUG_USER_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def _summarize_policy(policy: dict[str, Any]) -> dict[str, Any]:
@@ -368,6 +374,16 @@ async def send_message(
     bearer, which is what the trace_id will refer to.
     """
     r = request.app.state.redis
+    # Per-user debug (step-through) identity — set by the GUI on the
+    # send-message call. Scopes the timeout extension and is forwarded to the
+    # agent's /chat so the SDK can set its debug contextvar. The /chat hop does
+    # NOT go through the proxy, so passing this header directly is safe.
+    # Unlike the debug endpoints this is optional (normal sends omit it), so an
+    # unsafe value is dropped to None rather than rejected — it just isn't used
+    # to build a debug key or forwarded.
+    debug_user = request.headers.get("x-amaze-debug-user", "").strip() or None
+    if debug_user and not _DEBUG_USER_RE.match(debug_user):
+        debug_user = None
     try:
         # Prefer the chat-port URL if registered. The SDK serves user prompts
         # on a separate port (default 8080) from the A2A ingress (default
@@ -448,14 +464,18 @@ async def send_message(
     # several minutes. The UI fires this call without waiting for the reply,
     # so a long timeout here doesn't block any client.
     try:
-        debug_enabled = await r.exists(f"debug:{agent_id}:enabled")
+        if debug_user:
+            debug_enabled = await r.exists(f"debug:{agent_id}:{debug_user}:enabled")
+        else:
+            debug_enabled = await r.exists(f"debug:{agent_id}:enabled")
     except Exception:  # noqa: BLE001 — best-effort; fall back to short timeout
         debug_enabled = False
     agent_timeout = 3600.0 if debug_enabled else 60.0
 
+    headers = {"X-Amaze-Debug-User": debug_user} if debug_user else None
     try:
         async with httpx.AsyncClient(timeout=agent_timeout) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
     except httpx.TimeoutException as e:
         logger.warning("send_message: %s timeout to %s: %s", agent_id, url, e)
         raise HTTPException(status_code=504, detail="agent-timeout") from e
