@@ -71,6 +71,7 @@ Agents and MCP servers can run in separate containers or on different hosts. The
 | **Immutable audit log** | Redis Streams — every call, allowed or denied, with full I/O |
 | **Distributed traces** | OTel spans → Jaeger, each conversation shares one `trace_id` |
 | **Live policy editing** | GUI policy editor — changes take effect immediately, no restart |
+| **Live debugger (multi-user)** | Step through every LLM/MCP/A2A call in real time — pause, inspect, edit, resume. Multiple users debug the same agent independently |
 | **GUI dashboard** | Inspect traces, drill into alerts, manage policies |
 | **Zero framework coupling** | Works with LangChain, CrewAI, raw httpx — anything that respects `HTTP_PROXY` |
 
@@ -87,6 +88,10 @@ Agents and MCP servers can run in separate containers or on different hosts. The
 ---
 
 ## Screenshots
+
+**Live debugger (multi-user)** — step through an agent's run one call at a time: pause on every LLM / MCP / A2A request and response, inspect the full payload, edit it inline, then resume or skip. Multiple users can debug the **same** agent at once — each browser sees only its own session, parked under its own per-user namespace.
+
+![Multi-user live debugger](docs/screenshots/debugger.png)
 
 **Agent dashboard** — live KPIs, calls-over-time chart, and four interactive donuts (tokens/call, tool calls, A2A hops, alert reasons). Click any donut slice to drill into filtered traces.
 
