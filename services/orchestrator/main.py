@@ -35,14 +35,17 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from services.orchestrator import auth
 from services.orchestrator.routers import agents as agents_router
 from services.orchestrator.routers import alerts as alerts_router
+from services.orchestrator.routers import auth_routes as auth_routes_router
 from services.orchestrator.routers import debugger as debugger_router
 from services.orchestrator.routers import export as export_router
 from services.orchestrator.routers import llms as llms_router
 from services.orchestrator.routers import mcp as mcp_router
 from services.orchestrator.routers import policy as policy_router
 from services.orchestrator.routers import traces as traces_router
+from services.orchestrator.routers import users_routes as users_router
 from services.proxy import policy_store
 
 logger = logging.getLogger(__name__)
@@ -105,6 +108,10 @@ async def _lifespan(app: FastAPI):
     written = await policy_store.bootstrap_from_yaml()
     logger.info("orchestrator up: redis=%s config=%s policies_seeded=%d",
                 REDIS_URL, CONFIG_DIR, written)
+    # S7 — ensure an admin user exists, then adopt any pre-S7 orphan agents
+    # so the existing demo never breaks under owner-gated routes.
+    admin_id = await _bootstrap_admin(app.state.redis)
+    await _adopt_unowned_agents(app.state.redis, admin_id)
     try:
         yield
     finally:
@@ -123,6 +130,8 @@ app.include_router(traces_router.router)
 app.include_router(policy_router.router)
 app.include_router(alerts_router.router)
 app.include_router(export_router.router)
+app.include_router(auth_routes_router.router)
+app.include_router(users_router.router)
 
 
 async def _bootstrap_mcp_servers(r: redis.Redis) -> None:
@@ -138,6 +147,67 @@ async def _bootstrap_mcp_servers(r: redis.Redis) -> None:
         payload = json.dumps({"url": spec["url"], "tools": spec.get("tools", [])})
         await r.setnx(f"mcp:{name}", payload)
     logger.info("bootstrapped %d mcp servers from yaml", len(servers))
+
+
+async def _bootstrap_admin(r: redis.Redis) -> str:
+    """Ensure an admin user exists; return its user_id. Idempotent.
+
+    On first boot with no admin password configured, generate one and log it
+    exactly once so the operator can capture it from startup output.
+    """
+    admin_user = os.environ.get("AMAZE_ADMIN_USER", "admin")
+    existing = await r.get(f"username:{admin_user}")
+    if existing:
+        return existing
+    pw = os.environ.get("AMAZE_ADMIN_PASSWORD")
+    if not pw:
+        pw = secrets.token_urlsafe(12)
+        # Dev fallback: print the one-time password once so the operator can log
+        # in. Set AMAZE_ADMIN_PASSWORD in any real deploy so a live secret never
+        # lands in logs (which may be shipped/aggregated).
+        logger.warning(
+            "auth: no AMAZE_ADMIN_PASSWORD set — generated a one-time admin "
+            "password for %r (set AMAZE_ADMIN_PASSWORD to avoid logging it): %s",
+            admin_user, pw,
+        )
+    try:
+        user = await auth.create_user(r, admin_user, pw, role="admin")
+        return user.user_id
+    except HTTPException as e:
+        if e.status_code == 409:
+            # Lost a creation race — re-fetch the now-present id.
+            return await r.get(f"username:{admin_user}")
+        raise
+
+
+_ADOPTION_SENTINEL = "auth:adoption_swept"
+
+
+async def _adopt_unowned_agents(r: redis.Redis, admin_id: str) -> None:
+    """One-time migration: adopt PRE-S7 agents (registered before ownership
+    existed) that have neither an owner nor a pending claim, so the existing
+    demo keeps working under the new owner-gated routes.
+
+    Gated by a sentinel so it runs only on the first S7 boot. This keeps
+    quarantine durable across restarts: an agent deliberately registered
+    without a claim AFTER the migration stays orphaned (awaiting admin
+    adoption in S8) instead of being silently re-adopted to admin every boot.
+    New agents are bound at registration time, not here."""
+    if await r.get(_ADOPTION_SENTINEL):
+        return
+    adopted = 0
+    async for key in r.scan_iter(match="agent:*:endpoint"):
+        agent_id = key[len("agent:"):-len(":endpoint")]
+        owner = await r.get(f"agent:{agent_id}:owner")
+        if owner is not None:
+            continue
+        claim = await r.get(f"agent:{agent_id}:claim")
+        if claim is not None:
+            continue
+        await auth.bind_owner(r, agent_id, admin_id)
+        adopted += 1
+    await r.set(_ADOPTION_SENTINEL, "1")
+    logger.info("auth: adopted %d unowned agent(s) to admin (one-time migration)", adopted)
 
 
 # --- Endpoints ------------------------------------------------------------
@@ -223,6 +293,17 @@ async def _register_agent(req: RegisterAgentRequest) -> RegisterAgentResponse:
     # SETNX preserves a pre-existing approval decision (operator approved before agent registered).
     pipe.setnx(f"agent:{req.agent_id}:approved", "false")
     await pipe.execute()
+
+    # S7 — bind ownership on first registration. Idempotent re-register leaves
+    # an already-set owner untouched.
+    owner = await r.get(f"agent:{req.agent_id}:owner")
+    if owner is None:
+        claim = await r.get(f"agent:{req.agent_id}:claim")
+        if claim:
+            await auth.bind_owner(r, req.agent_id, claim)
+        # else: no claim -> quarantine. Leave owner unset; the agent is an
+        # orphan, invisible to non-admins and 404 on every owner-gated route.
+        # Only an admin can adopt it later (S8).
 
     logger.info("registered agent_id=%s session=%s", req.agent_id, session_id)
     return RegisterAgentResponse(

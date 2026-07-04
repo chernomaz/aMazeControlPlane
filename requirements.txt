@@ -21,3 +21,6 @@ opentelemetry-exporter-otlp-proto-grpc>=1.24,<2
 redis[hiredis]>=5.2,<6
 httpx[http2]>=0.27,<1
 pydantic>=2.9,<3
+
+# --- auth (S7: orchestrator session auth) ---
+bcrypt>=4,<5

@@ -14,6 +14,8 @@ export interface Agent {
   registered_at: number | null
   endpoint: string | null
   policy_summary?: AgentPolicySummary
+  /** Owner username, or null if orphaned/unowned (admin console). */
+  owner?: string | null
 }
 
 export interface ApproveAgentResponse {
@@ -36,6 +38,14 @@ export function rejectAgent(agentId: string) {
     method: 'POST',
   })
 }
+
+// --- Claim agent id (S7) --------------------------------------------------
+
+export const claimAgent = (agentId: string) =>
+  apiFetch<{ claimed: boolean; agent_id: string }>(
+    `/agents/${encodeURIComponent(agentId)}/claim`,
+    { method: 'POST' },
+  )
 
 // --- Send message (S4-T3.3) ----------------------------------------------
 

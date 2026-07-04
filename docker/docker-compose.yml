@@ -55,6 +55,10 @@ services:
     environment:
       REDIS_URL: redis://amaze-redis:6379
       AMAZE_PROXY_URL: http://localhost:8080
+      # Default admin for the demo. On a FRESH boot (no existing admin) this
+      # creates admin/admin. Override both in any real deployment.
+      AMAZE_ADMIN_USER: admin
+      AMAZE_ADMIN_PASSWORD: admin
     depends_on:
       amaze-redis:
         condition: service_healthy

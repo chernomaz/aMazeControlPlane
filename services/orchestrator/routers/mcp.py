@@ -18,8 +18,10 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+
+from services.orchestrator.auth import User, current_user
 
 from ..mcp_probe import ProbeError, probe_tools
 
@@ -27,9 +29,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# S7: the MCP registry is a shared/global resource (not owned per-user), so the
+# human-facing GUI endpoints (list/approve/reject) require authentication but NOT
+# ownership. The MACHINE self-registration endpoints (`POST /mcp_servers` and
+# `/refresh`, called by scripts/amaze-mcp-register with no session cookie) stay
+# OPEN — same machine-vs-human split as `POST /register`.
+
 
 @router.get("/mcp_servers")
-async def list_mcp_servers(request: Request) -> list[dict[str, Any]]:
+async def list_mcp_servers(
+    request: Request,
+    user: User = Depends(current_user),
+) -> list[dict[str, Any]]:
     r = request.app.state.redis
     out: list[dict[str, Any]] = []
     try:
@@ -154,12 +165,20 @@ async def _set_mcp_approved(request: Request, name: str, approved: bool) -> dict
 
 
 @router.post("/mcp_servers/{name}/approve")
-async def approve_mcp_server(name: str, request: Request) -> dict[str, Any]:
+async def approve_mcp_server(
+    name: str,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
     return await _set_mcp_approved(request, name, True)
 
 
 @router.post("/mcp_servers/{name}/reject")
-async def reject_mcp_server(name: str, request: Request) -> dict[str, Any]:
+async def reject_mcp_server(
+    name: str,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
     return await _set_mcp_approved(request, name, False)
 
 

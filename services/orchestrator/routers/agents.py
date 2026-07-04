@@ -31,9 +31,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from services.orchestrator.auth import (
+    User,
+    current_user,
+    current_user_admin,
+    reassign_owner,
+    require_agent_owner,
+)
 from services.proxy import policy_store
 
 logger = logging.getLogger(__name__)
@@ -60,7 +67,9 @@ def _summarize_policy(policy: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/agents")
-async def list_agents(request: Request) -> list[dict[str, Any]]:
+async def list_agents(
+    request: Request, user: User = Depends(current_user)
+) -> list[dict[str, Any]]:
     r = request.app.state.redis
 
     # 1. Collect agent_ids registered in Redis (have an endpoint key).
@@ -76,6 +85,19 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
     except Exception as e:  # noqa: BLE001 — fail closed on Redis errors
         logger.error("agents: redis scan failed: %s", e)
         raise HTTPException(status_code=503, detail="redis-unavailable") from e
+
+    # Owner scoping (S7-T2.1): admins see every registered agent; a normal
+    # user sees only registered agents in their reverse index. The output
+    # object shape per agent is unchanged — only the SET of agent_ids differs.
+    if user.role != "admin":
+        try:
+            members = await r.smembers(f"user:{user.user_id}:agents")
+        except Exception as e:  # noqa: BLE001 — fail closed on Redis errors
+            logger.error("agents: redis smembers failed: %s", e)
+            raise HTTPException(status_code=503, detail="redis-unavailable") from e
+        registered = {
+            aid: ep for aid, ep in registered.items() if aid in members
+        }
 
     # 2. Fetch policy IDs to determine state label for registered agents.
     # Only registered agents appear in the list — policy presence affects
@@ -108,10 +130,20 @@ async def list_agents(request: Request) -> list[dict[str, Any]]:
         # registered_at — best effort; we don't currently persist a timestamp.
         registered_at: float | None = None
 
+        # Owner username for the admin console (None if orphaned/unowned).
+        owner_username: str | None = None
+        try:
+            owner_id = await r.get(f"agent:{agent_id}:owner")
+            if owner_id:
+                owner_username = await r.hget(f"user:{owner_id}", "username")
+        except Exception:  # noqa: BLE001 — owner display is best-effort
+            owner_username = None
+
         entry: dict[str, Any] = {
             "agent_id": agent_id,
             "state": state,
             "registered_at": registered_at,
+            "owner": owner_username,
         }
         if agent_id in registered:
             entry["endpoint"] = registered[agent_id]
@@ -147,19 +179,90 @@ async def _set_agent_approved(request: Request, agent_id: str, approved: bool) -
     return {"agent_id": agent_id, "approved": approved}
 
 
+@router.post("/agents/{agent_id}/claim")
+async def claim_agent(
+    agent_id: str, request: Request, user: User = Depends(current_user)
+) -> dict[str, Any]:
+    """Reserve an agent_id before it registers (S7-T2.1).
+
+    Claim-before-existence: a normal user may NOT grab an already-registered
+    orphan (admin adopts those in S8). The NX set on `agent:{id}:claim` makes
+    the reservation atomic against concurrent claimers.
+    """
+    r = request.app.state.redis
+    try:
+        if await r.get(f"agent:{agent_id}:owner") is not None:
+            raise HTTPException(status_code=409, detail="agent-id-taken")
+        if await r.get(f"agent:{agent_id}:endpoint") is not None:
+            raise HTTPException(status_code=409, detail="agent-id-taken")
+        ok = await r.set(f"agent:{agent_id}:claim", user.user_id, nx=True)
+        if not ok:
+            raise HTTPException(status_code=409, detail="agent-id-taken")
+        await r.sadd(f"user:{user.user_id}:agents", agent_id)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — fail closed on Redis errors
+        logger.error("claim_agent: redis op failed for %s: %s", agent_id, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+    return {"claimed": True, "agent_id": agent_id}
+
+
+class AssignOwnerBody(BaseModel):
+    user_id: str
+
+
+@router.post("/agents/{agent_id}/assign")
+async def assign_agent(
+    agent_id: str,
+    body: AssignOwnerBody,
+    request: Request,
+    admin: User = Depends(current_user_admin),
+) -> dict[str, Any]:
+    """Reassign an agent to a single owner (S8). Admin-only. Enforces the
+    one-agent-one-owner invariant: detaches the previous owner before binding
+    the new one. 404 if the agent isn't registered or the target user is gone."""
+    r = request.app.state.redis
+    try:
+        if not await _agent_exists(r, agent_id):
+            raise HTTPException(status_code=404, detail="agent-not-found")
+        if not await r.exists(f"user:{body.user_id}"):
+            raise HTTPException(status_code=404, detail="user-not-found")
+        await reassign_owner(r, agent_id, body.user_id)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — fail closed on Redis errors
+        logger.error("assign_agent: redis op failed for %s: %s", agent_id, e)
+        raise HTTPException(status_code=503, detail="redis-unavailable") from e
+    logger.info("assign: %s -> user %s (by %s)", agent_id, body.user_id, admin.username)
+    return {"agent_id": agent_id, "owner": body.user_id}
+
+
 @router.post("/agents/{agent_id}/approve")
-async def approve_agent(agent_id: str, request: Request) -> dict[str, Any]:
+async def approve_agent(
+    agent_id: str, request: Request, user: User = Depends(current_user)
+) -> dict[str, Any]:
+    await require_agent_owner(request.app.state.redis, agent_id, user)
     return await _set_agent_approved(request, agent_id, True)
 
 
 @router.post("/agents/{agent_id}/reject")
-async def reject_agent(agent_id: str, request: Request) -> dict[str, Any]:
+async def reject_agent(
+    agent_id: str, request: Request, user: User = Depends(current_user)
+) -> dict[str, Any]:
+    await require_agent_owner(request.app.state.redis, agent_id, user)
     return await _set_agent_approved(request, agent_id, False)
 
 
 @router.delete("/agents/{agent_id}")
-async def remove_agent(agent_id: str, request: Request) -> dict[str, Any]:
+async def remove_agent(
+    agent_id: str, request: Request, user: User = Depends(current_user)
+) -> dict[str, Any]:
     r = request.app.state.redis
+    await require_agent_owner(r, agent_id, user)
+    # Read the owner BEFORE the scan-delete below — the `agent:{id}:*` pattern
+    # matches `agent:{id}:owner`, so the delete wipes it and a later read would
+    # see None, leaving a stale entry in the owner's reverse index.
+    owner = await r.get(f"agent:{agent_id}:owner")
     keys: list[str] = []
     async for key in r.scan_iter(match=f"agent:{agent_id}:*"):
         keys.append(key)
@@ -173,16 +276,25 @@ async def remove_agent(agent_id: str, request: Request) -> dict[str, Any]:
                 keys.append(key)
     if keys:
         await r.delete(*keys)
+    # Ownership cleanup (S7-T2.1): the scan above already removed the owner +
+    # claim sidecar keys; here we just drop the reverse-index entry using the
+    # owner captured before deletion.
+    if owner:
+        await r.srem(f"user:{owner}:agents", agent_id)
     logger.info("removed agent agent_id=%s keys=%d", agent_id, len(keys))
     return {"removed": agent_id}
 
 
 @router.get("/agents/{agent_id}/audit")
 async def agent_audit(
-    agent_id: str, request: Request, limit: int = 20
+    agent_id: str,
+    request: Request,
+    limit: int = 20,
+    user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
     """Return the most recent audit log entries for an agent from Redis Streams."""
     r = request.app.state.redis
+    await require_agent_owner(r, agent_id, user)
     try:
         entries = await r.xrevrange(f"audit:{agent_id}", count=min(limit, 100))
     except Exception as e:  # noqa: BLE001
@@ -364,7 +476,10 @@ def _looks_like_taskgroup_error(reply: Any) -> bool:
 
 @router.post("/agents/{agent_id}/messages")
 async def send_message(
-    agent_id: str, body: SendMessageRequest, request: Request
+    agent_id: str,
+    body: SendMessageRequest,
+    request: Request,
+    user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Forward a user prompt to the agent's inbound `/chat` endpoint.
 
@@ -374,6 +489,7 @@ async def send_message(
     bearer, which is what the trace_id will refer to.
     """
     r = request.app.state.redis
+    await require_agent_owner(r, agent_id, user)
     # Per-user debug (step-through) identity — set by the GUI on the
     # send-message call. Scopes the timeout extension and is forwarded to the
     # agent's /chat so the SDK can set its debug contextvar. The /chat hop does
@@ -533,7 +649,10 @@ _RANGE_SECONDS: dict[str, int] = {
 
 @router.get("/agents/{agent_id}/stats")
 async def agent_stats(
-    agent_id: str, request: Request, range: str = "24h"
+    agent_id: str,
+    request: Request,
+    range: str = "24h",
+    user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Dashboard payload for one agent over a fixed time window.
 
@@ -543,6 +662,9 @@ async def agent_stats(
     (TimeSeries reads, audit aggregation, denial breakdown) lives in
     the stats module so the GUI can call one URL per refresh.
     """
+    r = request.app.state.redis
+    await require_agent_owner(r, agent_id, user)
+
     range_seconds = _RANGE_SECONDS.get(range)
     if range_seconds is None:
         raise HTTPException(
@@ -550,7 +672,6 @@ async def agent_stats(
             detail=f"invalid-range; expected one of {sorted(_RANGE_SECONDS)}",
         )
 
-    r = request.app.state.redis
     try:
         if not await _agent_exists(r, agent_id):
             raise HTTPException(status_code=404, detail="agent-not-found")

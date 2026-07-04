@@ -58,6 +58,8 @@ import httpx
 import pytest
 import redis
 
+from conftest import _amaze_stack_up, _seed_user, S7_USERS
+
 # ── connection settings (mirror test_s4.py — live stack) ───────────────────
 
 ORCH = os.environ.get("AMAZE_ORCHESTRATOR", "http://localhost:8001")
@@ -71,6 +73,13 @@ DEMO_AGENT = "agent-sdk"
 # Two simulated browsers — distinct X-Amaze-Debug-User header values.
 U1 = "st-mu-u1"
 U2 = "st-mu-u2"
+
+# S7: the debug + send-message endpoints are now session-gated. We log in once
+# as the deterministic admin principal (role=admin → owns/bypasses every agent)
+# and reuse its `amaze_session` cookie on EVERY request, including the
+# background send-message threads. The two X-Amaze-Debug-User UUIDs above are
+# orthogonal to this cookie — both run under the single admin session.
+_ADMIN_COOKIES: httpx.Cookies = httpx.Cookies()
 
 # A "bitcoin" prompt routes agent-sdk → agent-sdk1; "weather" → agent-sdk2
 # (see examples/agents/agent_sdk.py:68). Either fans out to a real LLM + MCP
@@ -94,6 +103,11 @@ RUN_DRAIN_TIMEOUT = 180.0  # wait for a backgrounded send-message run to finish
 @pytest.fixture(scope="module")
 def http() -> httpx.Client:
     """Plain orchestrator client (no debug header) — see test_s4.py `http`."""
+    # S7: seed the deterministic admin principal so we can authenticate.
+    if not _amaze_stack_up():
+        pytest.skip("amaze-platform stack not up on :8001")
+    for u, p, role in S7_USERS:
+        _seed_user(u, p, role)
     with httpx.Client(base_url=ORCH, timeout=60.0) as c:
         # Fail fast (skip, not error) if the live stack is down.
         try:
@@ -102,6 +116,14 @@ def http() -> httpx.Client:
             pytest.skip(f"orchestrator unreachable at {ORCH}: {e}")
         if h.status_code != 200:
             pytest.skip(f"orchestrator /health not ok: {h.status_code} {h.text}")
+        # Log in as admin; cache the session cookie for the background
+        # send-message threads (which build their own clients).
+        login = c.post(
+            "/auth/login",
+            json={"username": "s7-root", "password": "s7-root-pass"},
+        )
+        assert login.status_code == 200, f"admin login failed: {login.text}"
+        _ADMIN_COOKIES.update(c.cookies)
         yield c
 
 
@@ -177,7 +199,9 @@ def _send_message_async(user: str | None, prompt: str) -> threading.Thread:
     def _run() -> None:
         headers = _du(user) if user is not None else None
         try:
-            with httpx.Client(base_url=ORCH, timeout=RUN_DRAIN_TIMEOUT) as c:
+            # S7: send-message is session-gated — reuse the admin cookie.
+            with httpx.Client(base_url=ORCH, timeout=RUN_DRAIN_TIMEOUT,
+                              cookies=_ADMIN_COOKIES) as c:
                 c.post(f"/agents/{DEMO_AGENT}/messages",
                        json={"prompt": prompt}, headers=headers)
         except httpx.HTTPError:
@@ -530,11 +554,14 @@ def test_st_mu_5_untagged_bypass(http: httpx.Client, rc: redis.Redis) -> None:
         # so it runs to completion on the regular timeout and returns 200.
         completed = False
         try:
-            with httpx.Client(base_url=ORCH, timeout=120.0) as c:
+            # S7: still authenticated (gated endpoint) — only the
+            # X-Amaze-Debug-User header is omitted, which is the whole point.
+            with httpx.Client(base_url=ORCH, timeout=120.0,
+                              cookies=_ADMIN_COOKIES) as c:
                 resp = c.post(
                     f"/agents/{DEMO_AGENT}/messages",
                     json={"prompt": PROMPT_WEATHER},
-                )  # NB: no headers — this is the whole point
+                )  # NB: no debug header — this is the whole point
             completed = resp.status_code == 200
         except httpx.HTTPError:
             completed = False  # best-effort; the core assertions are on Redis

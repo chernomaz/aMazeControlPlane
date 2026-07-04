@@ -35,6 +35,8 @@ import httpx
 import pytest
 import redis
 
+from conftest import _amaze_stack_up, _seed_user, S7_USERS
+
 # ── connection settings ────────────────────────────────────────────────────
 
 ORCH = os.environ.get("AMAZE_ORCHESTRATOR", "http://localhost:8001")
@@ -97,7 +99,21 @@ def _container_litellm_remove_entry(model_name: str) -> None:
 
 @pytest.fixture(scope="module")
 def http() -> httpx.Client:
+    # S7: control-plane endpoints are now session-gated. Seed the deterministic
+    # admin principal and log in so every gated request below carries the
+    # `amaze_session` cookie. s7-root has role=admin → bypasses per-agent
+    # ownership, so the existing agent-sdk assertions keep working unchanged.
+    # (s7-admin was demoted to a regular user in S8; s7-root is the test admin.)
+    if not _amaze_stack_up():
+        pytest.skip("amaze-platform stack not up on :8001")
+    for u, p, role in S7_USERS:
+        _seed_user(u, p, role)
     with httpx.Client(base_url=ORCH, timeout=60.0) as c:
+        login = c.post(
+            "/auth/login",
+            json={"username": "s7-root", "password": "s7-root-pass"},
+        )
+        assert login.status_code == 200, f"admin login failed: {login.text}"
         yield c
 
 

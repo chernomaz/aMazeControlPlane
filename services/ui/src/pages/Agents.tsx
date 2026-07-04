@@ -4,12 +4,14 @@ import { DebuggerPanel } from './AgentDebugger'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   approveAgent,
+  claimAgent,
   listAgents,
   rejectAgent,
   removeAgent,
   sendAgentMessage,
   type Agent,
 } from '@/api/agents'
+import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { getAgentStats, type StatsRange, type CategoryBucket } from '@/api/stats'
 import { listTraces, type TraceListItem } from '@/api/traces'
@@ -582,6 +584,75 @@ function ApprovedDetail({ agent, onRemove, removeDisabled, onToast }: {
   )
 }
 
+// ── Claim agent id (S7) ───────────────────────────────────────────────────────
+
+function ClaimAgent({ onToast }: { onToast: (msg: string, kind: 'success' | 'error') => void }) {
+  const qc = useQueryClient()
+  const [agentId, setAgentId] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const claim = useMutation({
+    mutationFn: (id: string) => claimAgent(id),
+    onSuccess: (_r, id) => {
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      onToast(`Claimed ${id}`, 'success')
+      setAgentId('')
+      setError(null)
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError && err.status === 409) {
+        setError('That agent id is already taken')
+      } else {
+        setError(err instanceof Error ? err.message : 'Claim failed')
+      }
+    },
+  })
+
+  const handleClaim = () => {
+    const id = agentId.trim()
+    if (!id || claim.isPending) return
+    setError(null)
+    claim.mutate(id)
+  }
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+        Claim an agent id
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          type="text"
+          value={agentId}
+          onChange={e => { setAgentId(e.target.value); setError(null) }}
+          onKeyDown={e => e.key === 'Enter' && handleClaim()}
+          placeholder="agent-id"
+          style={{
+            flex: 1,
+            padding: '8px 11px',
+            fontSize: 13,
+            background: 'var(--panel2)',
+            border: `1px solid ${error ? 'var(--red)' : 'var(--line)'}`,
+            borderRadius: 8,
+            color: 'var(--text)',
+            outline: 'none',
+            boxSizing: 'border-box',
+            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+          }}
+        />
+        <Button size="sm" onClick={handleClaim} disabled={claim.isPending || !agentId.trim()}>
+          {claim.isPending ? '…' : 'Claim'}
+        </Button>
+      </div>
+      {error && (
+        <div role="alert" style={{ marginTop: 8, fontSize: 12, color: '#ffb3b3' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Agents() {
@@ -637,10 +708,13 @@ export default function Agents() {
     <div>
       {/* Page header (only when no agent selected) */}
       {!selected && !isLoading && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Agents</div>
-          <div style={{ fontSize: 13, color: 'var(--muted-raw)' }}>Select an agent from the sidebar to view its dashboard.</div>
-        </div>
+        <>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Agents</div>
+            <div style={{ fontSize: 13, color: 'var(--muted-raw)' }}>Select an agent from the sidebar to view its dashboard.</div>
+          </div>
+          <ClaimAgent onToast={pushToast} />
+        </>
       )}
 
       {isLoading && !selected && (

@@ -106,6 +106,27 @@ services:
     ports:
       - "9004:9004"     # A2A — symmetric mapping; proxy reaches via host.docker.internal:9004
 
+  # agent-sdk3 — the "all tools" agent. Has a chat port (like agent-sdk) so it
+  # is chattable from the GUI, and a policy allowing every demo-mcp tool.
+  agent-sdk3:
+    <<: *agent-defaults
+    container_name: agent-sdk3
+    build:
+      context: ..
+      dockerfile: examples/agents/Dockerfile
+      args:
+        AGENT_MODULE: agent_sdk3
+    environment:
+      <<: *agent-env
+      AMAZE_AGENT_ID: agent-sdk3
+      AMAZE_A2A_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+      AMAZE_A2A_PORT: "9005"
+      AMAZE_CHAT_HOST: ${AMAZE_PROXY_HOST:-host.docker.internal}
+      AMAZE_CHAT_PORT: "8091"
+    ports:
+      - "8091:8091"     # user-facing /chat — symmetric mapping matches AMAZE_CHAT_PORT
+      - "9005:9005"     # A2A — symmetric mapping; proxy reaches via host.docker.internal:9005
+
   # ── MCP server ─────────────────────────────────────────────────────────
   # entrypoint.sh fires amaze-mcp-register in the background on startup,
   # then execs into the MCP server. No separate sidecar needed.

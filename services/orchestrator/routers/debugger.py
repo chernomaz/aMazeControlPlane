@@ -35,9 +35,10 @@ import re
 from typing import Any
 
 import redis.asyncio as redis
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from services.orchestrator.auth import User, current_user, require_agent_owner
 from services.proxy import policy_store
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,8 @@ def _debug_user(request: Request) -> str:
 
 @router.put("/agents/{agent_id}/debug")
 async def set_debug(
-    agent_id: str, body: EnableDebugBody, request: Request
+    agent_id: str, body: EnableDebugBody, request: Request,
+    auth_user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Enable or disable debug (step-through) mode for an agent.
 
@@ -100,8 +102,13 @@ async def set_debug(
     dead-man's switch: if the UI disappears, polling stops, the key expires,
     and the proxy stops intercepting within ENABLED_TTL seconds.
     """
-    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
+    # S7: ownership gate. 401 (current_user dep) already ran; a non-owner gets
+    # 403 / unknown agent 404 here, BEFORE the 400 missing-debug-user path — so
+    # a valid X-Amaze-Debug-User UUID is no longer an authz bypass. The UUID
+    # stays the concurrency key only.
+    await require_agent_owner(r, agent_id, auth_user)
+    user = _debug_user(request)
 
     # Resolve peer agents from the primary's policy so we can propagate debug.
     try:
@@ -144,15 +151,21 @@ async def set_debug(
 
 @router.get("/agents/{agent_id}/debug/current")
 async def get_current(
-    agent_id: str, request: Request
+    agent_id: str, request: Request,
+    auth_user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Return the current paused step and history. Polled by the UI every 1 s.
 
     Polling this endpoint refreshes the enabled key (keepalive). If the UI
     goes away the key expires and the proxy stops intercepting.
     """
-    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
+    # S7: ownership gate. 401 (current_user dep) already ran; a non-owner gets
+    # 403 / unknown agent 404 here, BEFORE the 400 missing-debug-user path — so
+    # a valid X-Amaze-Debug-User UUID is no longer an authz bypass. The UUID
+    # stays the concurrency key only.
+    await require_agent_owner(r, agent_id, auth_user)
+    user = _debug_user(request)
     try:
         # Keepalive: refresh TTL on the enabled flag AND all peer routing keys
         # so that peer agents don't lose their primary_agent binding while the
@@ -204,7 +217,8 @@ async def get_current(
 
 @router.post("/agents/{agent_id}/debug/next")
 async def advance_next(
-    agent_id: str, body: NextStepBody, request: Request
+    agent_id: str, body: NextStepBody, request: Request,
+    auth_user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Advance past the currently paused step.
 
@@ -212,8 +226,13 @@ async def advance_next(
     double-advancing on stale UI state), optionally records an override value
     for the proxy to read, pops the step, and pushes the gate signal.
     """
-    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
+    # S7: ownership gate. 401 (current_user dep) already ran; a non-owner gets
+    # 403 / unknown agent 404 here, BEFORE the 400 missing-debug-user path — so
+    # a valid X-Amaze-Debug-User UUID is no longer an authz bypass. The UUID
+    # stays the concurrency key only.
+    await require_agent_owner(r, agent_id, auth_user)
+    user = _debug_user(request)
     try:
         head: str | None = await r.lindex(f"debug:{agent_id}:{user}:queue", 0)
         if head != body.step_id:
@@ -244,15 +263,21 @@ async def advance_next(
 
 @router.post("/agents/{agent_id}/debug/skip-all")
 async def skip_all(
-    agent_id: str, request: Request
+    agent_id: str, request: Request,
+    auth_user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Release all queued steps at once and engage skip-mode.
 
     Skip-mode tells the proxy to pass future steps through immediately
     without parking them, until the SKIP_TTL expires or debug is disabled.
     """
-    user = _debug_user(request)
     r: redis.Redis = request.app.state.redis
+    # S7: ownership gate. 401 (current_user dep) already ran; a non-owner gets
+    # 403 / unknown agent 404 here, BEFORE the 400 missing-debug-user path — so
+    # a valid X-Amaze-Debug-User UUID is no longer an authz bypass. The UUID
+    # stays the concurrency key only.
+    await require_agent_owner(r, agent_id, auth_user)
+    user = _debug_user(request)
     count = 0
     try:
         await r.setex(f"debug:{agent_id}:{user}:skip_mode", SKIP_TTL, "1")

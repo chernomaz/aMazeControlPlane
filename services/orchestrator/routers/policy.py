@@ -13,8 +13,9 @@ from __future__ import annotations
 import logging
 
 import redis.asyncio as redis
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from services.orchestrator.auth import User, current_user, require_agent_owner
 from services.proxy import policy_store
 from services.proxy.policy import Policy
 
@@ -24,10 +25,15 @@ router = APIRouter()
 
 
 @router.get("/policy/{agent_id}")
-async def get_policy_endpoint(agent_id: str) -> dict:
+async def get_policy_endpoint(
+    agent_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict:
     """Return the full policy JSON for `agent_id`. 404 if absent in Redis
-    AND in the YAML fallback.
+    AND in the YAML fallback. S7: caller must own the agent.
     """
+    await require_agent_owner(request.app.state.redis, agent_id, user)
     try:
         policy = await policy_store.get_policy(agent_id)
     except redis.RedisError as e:
@@ -40,14 +46,22 @@ async def get_policy_endpoint(agent_id: str) -> dict:
 
 
 @router.put("/policy/{agent_id}")
-async def put_policy_endpoint(agent_id: str, policy: Policy) -> dict:
+async def put_policy_endpoint(
+    agent_id: str,
+    policy: Policy,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict:
     """Persist the full policy in Redis.
 
     FastAPI validates the body against the `Policy` Pydantic model — a
     malformed body returns 422 automatically. The `name` field is taken
     from the body; we do NOT enforce it equals `agent_id` (the YAML
     invariant) because the path is the canonical key here.
+
+    S7: caller must own the agent.
     """
+    await require_agent_owner(request.app.state.redis, agent_id, user)
     try:
         await policy_store.put_policy(agent_id, policy)
     except redis.RedisError as e:

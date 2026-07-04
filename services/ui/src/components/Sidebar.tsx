@@ -1,8 +1,9 @@
 import { NavLink, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
-import { Sun, Server, Users, Activity, AlertTriangle } from 'lucide-react'
+import { Sun, Server, Users, Activity, AlertTriangle, LogOut, UserCog } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listAgents, type Agent } from '@/api/agents'
+import { getMe, logout } from '@/api/auth'
 import { useState } from 'react'
 
 type Filter = 'all' | 'pending' | 'approved'
@@ -98,6 +99,7 @@ function NavItem({ to, label, icon: Icon, badge }: {
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
@@ -109,6 +111,24 @@ export default function Sidebar() {
     refetchInterval: 5_000,
     enabled: isAgents,
   })
+
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: getMe,
+    retry: false,
+  })
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+    } catch {
+      // Even if the request fails, clear local auth state and bounce to login.
+    }
+    // Clear the entire cache, not just ['me'] — otherwise this user's agents/
+    // users data lingers and briefly shows to whoever logs in next.
+    queryClient.clear()
+    navigate('/login')
+  }
 
   const agents: Agent[] = data ?? []
   const selectedId = searchParams.get('id')
@@ -238,10 +258,11 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Bottom nav: Traces, Alerts */}
+      {/* Bottom nav: Traces, Alerts, (admin) Users */}
       <div style={{ flexShrink: 0, padding: '4px 0' }}>
         <NavItem to="/traces" label="Traces" icon={Activity} />
         <NavItem to="/alerts" label="Alerts" icon={AlertTriangle} badge={0} />
+        {me?.role === 'admin' && <NavItem to="/users" label="Users" icon={UserCog} />}
       </div>
 
       {/* Platform status */}
@@ -251,6 +272,49 @@ export default function Sidebar() {
           Platform online
         </div>
         <div style={{ marginTop: 4 }}>Redis · Proxy · Jaeger</div>
+      </div>
+
+      {/* Logged-in user + logout */}
+      <div style={{ padding: '10px 12px 12px', borderTop: '1px solid var(--line)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{
+          flex: 1, minWidth: 0,
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 10px', borderRadius: 8,
+          background: 'var(--panel2)', border: '1px solid var(--line)',
+        }}>
+          <span style={{
+            width: 24, height: 24, flexShrink: 0, borderRadius: '50%',
+            background: 'rgba(93,169,255,.15)', color: 'var(--blue)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, fontWeight: 800, textTransform: 'uppercase',
+          }}>
+            {(me?.username ?? '?').slice(0, 1)}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {me?.username ?? '—'}
+            </div>
+            {me?.role && (
+              <div style={{ fontSize: 9.5, color: 'var(--muted-raw)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                {me.role}
+              </div>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={handleLogout}
+          title="Log out"
+          aria-label="Log out"
+          style={{
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 32, borderRadius: 8,
+            background: 'var(--panel2)', border: '1px solid var(--line)',
+            color: 'var(--muted-raw)', cursor: 'pointer',
+          }}
+        >
+          <LogOut size={15} strokeWidth={2} />
+        </button>
       </div>
     </aside>
   )

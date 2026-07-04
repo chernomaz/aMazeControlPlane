@@ -58,6 +58,17 @@ Policy enforcement runs in-process inside the proxy. If any check fails, the req
 
 Agents and MCP servers can run in separate containers or on different hosts. They register with the orchestrator through a known endpoint. After registration, the orchestrator knows the agent's identity, allowed tools, policy bindings, runtime limits, and network location.
 
+### Multi-user access control
+
+aMaze is multi-tenant. Humans log into the dashboard with a session cookie (bcrypt-hashed credentials), and every agent has **exactly one owner**:
+
+- **Roles.** `admin` users see and manage every agent and can administer accounts; regular users see and act on only the agents they own.
+- **Ownership binding.** A user *claims* an agent id in the dashboard before the agent is deployed; when the agent self-registers, ownership is bound to the claimer automatically. An agent that registers unclaimed is quarantined (owner-less) until an admin adopts it.
+- **Admin user console.** From the **Users** tab, admins create accounts (admin or regular), delete them, and assign or reassign any agent to a single owner.
+- **Owner-gated API.** Policy, debugger, messaging, stats, and audit routes are all scoped to the agent's owner (admins bypass). Agent identity (the proxy bearer, §7) stays entirely separate from human identity (the session cookie) — two principals, two components.
+
+The default bootstrap admin is `admin` / `admin`; override it with `AMAZE_ADMIN_USER` / `AMAZE_ADMIN_PASSWORD` on the platform container.
+
 ### What you get
 
 | Capability | What it does |
@@ -72,6 +83,8 @@ Agents and MCP servers can run in separate containers or on different hosts. The
 | **Distributed traces** | OTel spans → Jaeger, each conversation shares one `trace_id` |
 | **Live policy editing** | GUI policy editor — changes take effect immediately, no restart |
 | **Live debugger (multi-user)** | Step through every LLM/MCP/A2A call in real time — pause, inspect, edit, resume. Multiple users debug the same agent independently |
+| **User accounts & roles** | Cookie login with `admin` / regular roles; admins create and manage accounts from a Users console |
+| **Per-user agent ownership** | One owner per agent — regular users see only their own, admins see all and can (re)assign |
 | **GUI dashboard** | Inspect traces, drill into alerts, manage policies |
 | **Zero framework coupling** | Works with LangChain, CrewAI, raw httpx — anything that respects `HTTP_PROXY` |
 
@@ -178,7 +191,7 @@ docker compose \
 Your agent is now under full policy enforcement. See `examples/compose.yml` for a complete multi-agent reference.
 
 - Jaeger traces → [http://localhost:16686](http://localhost:16686)
-- Control plane GUI → [http://localhost:5173](http://localhost:5173)
+- Control plane GUI → [http://localhost:5173](http://localhost:5173) — sign in with `admin` / `admin` (default; override via `AMAZE_ADMIN_USER` / `AMAZE_ADMIN_PASSWORD`)
 
 ---
 

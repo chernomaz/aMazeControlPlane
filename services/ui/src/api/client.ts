@@ -14,9 +14,19 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     // Content-Type default (any caller passing custom headers, e.g. the debug
     // X-Amaze-Debug-User, would otherwise send the body as text/plain → 422).
     ...options,
+    // S7: send the amaze_session cookie on every control-plane request.
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
   if (res.status === 204) return undefined as T
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    // S7: session missing/expired — bounce to the login page. The /auth/* guard
+    // lets a failed login surface its own 401 to the form instead of redirecting.
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login')
+    }
+    throw new ApiError(401, 'not-authenticated')
+  }
   if (!res.ok) {
     let msg = res.statusText
     try {

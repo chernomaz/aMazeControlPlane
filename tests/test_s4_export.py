@@ -28,6 +28,8 @@ import zipfile
 import httpx
 import pytest
 
+from conftest import _amaze_stack_up, _seed_user, S7_USERS
+
 
 ORCH = os.environ.get("AMAZE_ORCHESTRATOR", "http://localhost:8001")
 
@@ -60,7 +62,20 @@ EXPECTED_CSV_HEADER = [
 
 @pytest.fixture(scope="module")
 def http() -> httpx.Client:
+    # S7: the send-message leg (and any other gated control-plane call) now
+    # requires a session cookie. Seed + log in as the deterministic admin
+    # principal (role=admin → bypasses per-agent ownership) so every request
+    # below is authenticated. Skips if the live stack is down.
+    if not _amaze_stack_up():
+        pytest.skip("amaze-platform stack not up on :8001")
+    for u, p, role in S7_USERS:
+        _seed_user(u, p, role)
     with httpx.Client(base_url=ORCH, timeout=120.0) as c:
+        login = c.post(
+            "/auth/login",
+            json={"username": "s7-root", "password": "s7-root-pass"},
+        )
+        assert login.status_code == 200, f"admin login failed: {login.text}"
         yield c
 
 
