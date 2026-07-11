@@ -212,7 +212,28 @@ function EdgesTable({
                     {formatTs(e.ts)}
                   </TableCell>
                   <TableCell style={{ fontSize: 12 }}>{e.type}</TableCell>
-                  <TableCell style={{ fontSize: 12, fontWeight: 600 }}>{e.name}</TableCell>
+                  <TableCell style={{ fontSize: 12, fontWeight: 600 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {e.name}
+                      {e.pii_redacted && (
+                        <span
+                          title="Tool input/output redacted before reaching agent or MCP server"
+                          style={{
+                            padding: '1px 6px',
+                            borderRadius: 999,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: '0.2px',
+                            background: 'rgba(99,102,241,0.15)',
+                            color: 'var(--blue)',
+                            border: '1px solid rgba(99,102,241,0.3)',
+                          }}
+                        >
+                          PII redacted
+                        </span>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell style={{ fontSize: 12 }}>{e.indirect ? 'yes' : 'no'}</TableCell>
                   <TableCell style={{ fontSize: 12, color: 'var(--muted-raw)' }}>{e.source || '—'}</TableCell>
                   <TableCell style={{ ...MONO, fontSize: 11 }}>{e.model || '—'}</TableCell>

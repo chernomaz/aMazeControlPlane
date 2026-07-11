@@ -442,6 +442,7 @@ export default function AgentDashboard() {
         {[
           { label: 'Dashboard', path: `/agents/${encodeURIComponent(agentId)}` },
           { label: 'Policy',    path: `/agents/${encodeURIComponent(agentId)}/policy` },
+          { label: 'PII',       path: `/agents/${encodeURIComponent(agentId)}/pii` },
           { label: 'Debugger',  path: `/agents/${encodeURIComponent(agentId)}/debugger` },
         ].map((tab) => {
           const active = location.pathname === tab.path

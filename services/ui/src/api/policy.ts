@@ -45,6 +45,9 @@ export interface RateLimit {
   max_tokens: number
 }
 
+// PII redaction config — see api/pii.ts for the full types. Duplicated as
+// `unknown | null` here so AgentPolicy's PUT round-trips the field without
+// caring about its shape (the PII tab has its own dedicated endpoint).
 export interface Policy {
   name: string
   max_tokens_per_turn: number
@@ -58,6 +61,7 @@ export interface Policy {
   allowed_tools: string[]
   allowed_agents: string[]
   graph: Graph | null
+  pii_config?: unknown | null
 }
 
 export interface PutPolicyResponse {

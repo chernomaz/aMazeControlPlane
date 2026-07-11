@@ -524,6 +524,7 @@ async def assemble_trace(trace_id: str) -> dict[str, Any] | None:
             "input": _truncate(r.get("input", ""), _INPUT_TRUNCATE),
             # A2A forward edge: output is shown on the paired a2a-return edge instead.
             "output": "" if kind == "a2a" else _truncate(r.get("output", ""), _OUTPUT_TRUNCATE),
+            "pii_redacted": r.get("pii_redacted") == "true",
         })
 
         # ---- violation row (denied, OR alerted-mode pass-with-alert) ----

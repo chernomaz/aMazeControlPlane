@@ -45,6 +45,8 @@ def create_schema(cursor):
             city        VARCHAR(100),
             age         TINYINT UNSIGNED,
             is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            phone       VARCHAR(30),
+            credit_card VARCHAR(25),
             created_at  DATETIME NOT NULL
         )
     """)
@@ -76,6 +78,67 @@ def create_schema(cursor):
     """)
 
 
+CC_PREFIXES = [
+    # (bin_prefix, total_len)  — all synthetic BINs, not tied to real issuers.
+    ("4111",           16),   # Visa test-BIN
+    ("5500",           16),   # Mastercard test-BIN
+    ("340000",         15),   # Amex test-BIN
+]
+
+PHONE_FORMATS = [
+    "+1-{a}-{b}-{c}",
+    "+1 {a} {b} {c}",
+    "({a}) {b}-{c}",
+    "{a}-{b}-{c}",
+    "{a}.{b}.{c}",
+]
+
+# US-only area codes. Random NANP numbers can land on Caribbean codes (242,
+# 246, 268, 284, 340, 441, 473, 649, 664, 758, 767, 784, 809, 829, 849, 868,
+# 869, 876) — those parse as non-US in libphonenumber and Presidio's
+# PhoneRecognizer skips them under +1. Curated US-territory sample:
+US_AREA_CODES = [
+    "212", "213", "312", "313", "404", "415", "480", "503", "512", "617",
+    "702", "718", "808", "845", "917", "312", "213", "702", "312", "202",
+    "512", "203", "206", "213", "215", "281", "303", "305", "310", "323",
+    "347", "408", "410", "412", "469", "509", "510", "561", "602", "614",
+    "646", "678", "704", "716", "720", "737", "760", "832", "858", "919",
+]
+
+
+def _luhn_check_digit(digits: str) -> str:
+    """Return the single check digit that makes `digits` pass Luhn."""
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 0:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return str((10 - total % 10) % 10)
+
+
+def _fake_credit_card() -> str:
+    prefix, total_len = random.choice(CC_PREFIXES)
+    body_len = total_len - len(prefix) - 1
+    body = "".join(str(random.randint(0, 9)) for _ in range(body_len))
+    full = prefix + body
+    full += _luhn_check_digit(full)
+    # Format in groups of 4 (or 4-6-5 for 15-digit Amex).
+    if len(full) == 15:
+        return f"{full[:4]}-{full[4:10]}-{full[10:]}"
+    return "-".join(full[i:i+4] for i in range(0, 16, 4))
+
+
+def _fake_phone() -> str:
+    a = random.choice(US_AREA_CODES)
+    b = random.randint(200, 999)
+    c = random.randint(0, 9999)
+    fmt = random.choice(PHONE_FORMATS)
+    return fmt.format(a=a, b=f"{b:03d}", c=f"{c:04d}")
+
+
 def seed_users(cursor, n=1000):
     base = datetime.datetime(2022, 1, 1)
     rows = []
@@ -93,13 +156,16 @@ def seed_users(cursor, n=1000):
         city = random.choice(CITIES)
         age = random.randint(18, 75)
         is_active = random.random() > 0.1
+        phone = _fake_phone()
+        credit_card = _fake_credit_card()
         created_at = base + datetime.timedelta(days=random.randint(0, 1000), hours=random.randint(0, 23))
-        rows.append((name, email, city, age, is_active, created_at))
+        rows.append((name, email, city, age, is_active, phone, credit_card, created_at))
     cursor.executemany(
-        "INSERT INTO users (name, email, city, age, is_active, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+        "INSERT INTO users (name, email, city, age, is_active, phone, credit_card, created_at) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
         rows
     )
-    print(f"  Inserted {n} users")
+    print(f"  Inserted {n} users (with phone + credit_card)")
 
 
 def seed_products(cursor, n=1000):

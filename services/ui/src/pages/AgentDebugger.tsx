@@ -873,6 +873,7 @@ function AgentTabBar({ agentId }: { agentId: string }) {
   const tabs = [
     { label: 'Dashboard', path: `/agents/${encodeURIComponent(agentId)}` },
     { label: 'Policy',    path: `/agents/${encodeURIComponent(agentId)}/policy` },
+    { label: 'PII',       path: `/agents/${encodeURIComponent(agentId)}/pii` },
     { label: 'Debugger',  path: `/agents/${encodeURIComponent(agentId)}/debugger` },
   ]
   return (

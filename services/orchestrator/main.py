@@ -43,6 +43,7 @@ from services.orchestrator.routers import debugger as debugger_router
 from services.orchestrator.routers import export as export_router
 from services.orchestrator.routers import llms as llms_router
 from services.orchestrator.routers import mcp as mcp_router
+from services.orchestrator.routers import pii as pii_router
 from services.orchestrator.routers import policy as policy_router
 from services.orchestrator.routers import traces as traces_router
 from services.orchestrator.routers import users_routes as users_router
@@ -128,6 +129,7 @@ app.include_router(mcp_router.router)
 app.include_router(llms_router.router)
 app.include_router(traces_router.router)
 app.include_router(policy_router.router)
+app.include_router(pii_router.router)
 app.include_router(alerts_router.router)
 app.include_router(export_router.router)
 app.include_router(auth_routes_router.router)

@@ -24,3 +24,14 @@ pydantic>=2.9,<3
 
 # --- auth (S7: orchestrator session auth) ---
 bcrypt>=4,<5
+
+# --- PII redaction (S8 proxy addon; S8.1 spaCy NER swap) ---
+# Analyzer only — presidio-anonymizer's cryptography>=46 conflicts with
+# mitmproxy 11's cryptography<44.1. Text replacement is done inline in
+# services/proxy/pii_engine.py using RecognizerResult spans.
+#
+# spaCy is a transitive of presidio-analyzer but we pin it here so image
+# builds are reproducible. Model download (en_core_web_md) happens in the
+# Dockerfile, not via pip. Runtime backend switches on PII_NLP_MODE=regex|ner.
+presidio-analyzer>=2.2,<3
+spacy>=3.8,<4

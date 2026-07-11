@@ -46,6 +46,7 @@ from services.proxy.debug_pauser import DebugPauser
 from services.proxy.deny import deny
 from services.proxy.enforcer import PolicyEnforcer
 from services.proxy.graph_enforcer import GraphEnforcer
+from services.proxy.pii_redactor import PiiRedactor
 from services.proxy.router import Router
 from services.proxy.session import SessionIdentity
 from services.proxy.stream_blocker import StreamBlocker
@@ -123,6 +124,18 @@ addons = [
     FailClosed(GraphEnforcer(), "graph"),
     FailClosed(DebugPauser(), "debug_pauser"),
     FailClosed(StreamBlocker(), "stream_blocker"),
+    # PiiRedactor sits BEFORE AuditLog for two reasons:
+    # (1) request hook: input redaction happens before AuditLog stores the
+    #     pending Redis key, so PII never lands in mcp_pending:*.
+    # (2) responseheaders: for POST-SSE tool responses PiiRedactor sets its
+    #     own flow.response.stream and marks amaze_pii_owned_stream=True.
+    #     AuditLog's responseheaders (which runs next) sees the flag and
+    #     leaves the stream alone; PiiRedactor writes the audit record
+    #     itself from inside the stream handler.
+    # For buffered responses PiiRedactor just mutates flow.response.content
+    # and sets amaze_pii_redacted=True; AuditLog writes the record normally
+    # with the already-redacted content.
+    FailClosed(PiiRedactor(), "pii_redactor"),
     FailClosed(Counters(), "counters"),
     FailClosed(AuditLog(), "audit_log"),
     # Router always runs last — after all enforcement and audit. If any

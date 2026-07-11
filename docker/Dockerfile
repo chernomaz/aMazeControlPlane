@@ -31,6 +31,15 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
+# --- spaCy NER model for PII redaction ------------------------------------
+# ~600 MB on disk (word vectors dominate the size). Loaded by
+# services/proxy/pii_engine.py when PII_NLP_MODE=ner. Higher-accuracy tier
+# than en_core_web_md; catches uncommon single-word names / locations that
+# `md` misses. Verified inline so the build fails fast if the download
+# silently truncated.
+RUN python -m spacy download en_core_web_lg \
+ && python -c "import spacy; spacy.load('en_core_web_lg'); print('spaCy en_core_web_lg OK')"
+
 # --- Platform code + config ----------------------------------------------
 # Services and config are copied whole — orchestrator and proxy share the
 # same venv under /usr/local/lib/python3.12/site-packages.

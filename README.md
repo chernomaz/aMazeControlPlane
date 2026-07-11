@@ -1,8 +1,8 @@
 <div align="center">
 
-# aMaze Control Plane
+# aMaze
 
-### Proxy-first runtime governance, observability, and execution control for AI agents.
+### Stop your AI agents from burning money.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://python.org)
@@ -13,7 +13,27 @@
 
 ---
 
-aMaze Control Plane lets teams run AI agents, MCP tools, and agent-to-agent workflows through a controlled runtime layer where every LLM call, tool call, MCP request, and remote-agent interaction can be observed, audited, limited, or blocked — without touching agent code.
+A proxy that caps token spend, kills runaway loops, and governs every LLM, tool, and agent-to-agent call — **without touching your agent code.**
+
+Your agent gets stuck in a retry loop at 2 a.m. and burns through hundreds of dollars of tokens before anyone notices. Or one tool call quietly fans out into a hundred more. Tracing tools tell you what happened — after the invoice shows up.
+
+aMaze sits in front of every agent as an HTTP proxy and stops the spend *before* it happens: per-turn token caps, loop limits, and per-hour budgets, enforced in-line. If a call breaks the budget, it's blocked before it reaches the provider — and you see exactly which agent, which call, and why.
+
+![aMaze dashboard](docs/screenshots/dashboard.png)
+
+Point your agent at the proxy (`HTTP_PROXY=...`) and you're protected — no SDK, no code changes.
+
+### And it's actually a full control plane.
+
+The cost guard is one policy in a much larger enforcement layer. Because every call already flows through the proxy, aMaze governs the entire agent runtime:
+
+- **Traffic & identity** — allowlist LLM providers/models, MCP tools, and peer agents (A2A); spoof-proof bearer identity on every hop.
+- **Execution** — strict or flexible execution-graph ordering with per-step loop limits, plus per-turn and time-window token/call budgets.
+- **Content** — inspect payloads for PII and prompt injection, and redact or rewrite responses instead of only blocking them.
+- **Multi-tenant** — cookie login with admin/regular roles, one owner per agent, and owner-scoped policy, debugger, and audit APIs.
+- **Observability** — an immutable audit log, distributed traces (OTel → Jaeger), a live multi-user debugger, and a policy GUI where edits take effect on the next request.
+
+The difference from guardrail SDKs: aMaze is **in-path and non-bypassable** — no decorator to remember, no call an agent can make that skips it. Works with LangChain, CrewAI, or raw `httpx`, because it's just an HTTP proxy.
 
 ---
 
@@ -76,6 +96,7 @@ The default bootstrap admin is `admin` / `admin`; override it with `AMAZE_ADMIN_
 | **A2A enforcement** | Control which agents can call which peers |
 | **MCP tool enforcement** | Allow/deny specific tools per MCP server |
 | **LLM enforcement** | Allowlist providers, models, and token budgets |
+| **PII redaction** | Per-tool, per-parameter redaction of email / phone / CC / SSN / IP / URL / IBAN / person / location on both tool inputs and outputs — enforced in-flight by the proxy before payloads reach the tool or the agent. Powered by Presidio + spaCy NER |
 | **Execution graph** | Enforce tool/agent call ordering — strict or flexible mode |
 | **Per-turn limits** | `max_tokens`, `max_tool_calls`, `max_agent_calls` reset each message |
 | **Time-window rate limits** | Token budgets per 10 min / 1 hr via RedisTimeSeries |
@@ -117,6 +138,10 @@ The default bootstrap admin is `admin` / `admin`; override it with `AMAZE_ADMIN_
 **Trace detail** — per-conversation sequence diagram with swim lanes for every participant. Click an arrow to highlight the corresponding edge row. Full input/output in the table below.
 
 ![Trace detail with sequence diagram](docs/screenshots/traces.png)
+
+**PII redaction editor** — per-tool, per-parameter pill picker for the entity types to strip from tool inputs and outputs. Configured entities are enforced by the proxy before payloads reach the tool (input rules) or the agent (output rules). Nine canonical Presidio entities: Email, Credit Card, Phone, SSN, IP Address, Person, Address, URL, IBAN.
+
+![PII redaction editor](docs/screenshots/pii.png)
 
 **Alerts** — policy violations and budget breaches grouped by reason. Click a donut slice or reason pill to filter the traces table. Click any row to open the trace detail.
 

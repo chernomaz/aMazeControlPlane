@@ -27,7 +27,7 @@ def sql_query(query: str) -> str:
     """Execute a SQL query against the MySQL database and return the results.
 
     The database contains three tables:
-    - users(id, name, email, city, age, is_active, created_at)
+    - users(id, name, email, city, age, is_active, phone, credit_card, created_at)
     - products(id, name, description, price, category, stock, created_at)
     - orders(id, user_id, product_id, quantity, total_price, status, created_at)
 
@@ -42,22 +42,27 @@ def sql_query(query: str) -> str:
         if cursor.description:
             rows = cursor.fetchall()
             if not rows:
-                return "Query returned 0 rows."
-            # Serialize datetime objects to strings for JSON
+                return json.dumps({"rows": [], "count": 0})
+            # Serialize non-primitive types (datetime, Decimal) to strings for JSON.
             serializable = []
             for row in rows:
-                serializable.append({k: str(v) if not isinstance(v, (int, float, bool, type(None), str)) else v for k, v in row.items()})
-            result = json.dumps(serializable, indent=2, default=str)
+                serializable.append({
+                    k: str(v) if not isinstance(v, (int, float, bool, type(None), str)) else v
+                    for k, v in row.items()
+                })
+            # Return pure JSON. Row count is inline so the LLM can still see it
+            # in the "count" field, and the proxy's PII redactor can parse the
+            # whole response as JSON to redact leaf values individually.
             logger.info("sql_query returned %d rows", len(rows))
-            return f"{len(rows)} row(s):\n{result}"
+            return json.dumps({"count": len(rows), "rows": serializable}, indent=2, default=str)
         else:
             conn.commit()
             affected = cursor.rowcount
             logger.info("sql_query affected %d rows", affected)
-            return f"Query OK, {affected} row(s) affected."
+            return json.dumps({"status": "ok", "affected": affected})
     except Error as e:
         logger.error("sql_query error: %s", e)
-        return f"SQL Error: {e}"
+        return json.dumps({"error": str(e)})
     finally:
         try:
             cursor.close()

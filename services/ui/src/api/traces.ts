@@ -81,6 +81,7 @@ export interface TraceEdge {
   status: string
   input: string
   output: string
+  pii_redacted?: boolean
 }
 
 export interface TraceViolation {

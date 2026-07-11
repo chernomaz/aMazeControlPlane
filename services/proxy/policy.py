@@ -70,6 +70,46 @@ class Graph(BaseModel):
         return self
 
 
+PII_ENTITY_LABELS: frozenset[str] = frozenset({
+    "EMAIL_ADDRESS",
+    "CREDIT_CARD",
+    "PHONE_NUMBER",
+    "US_SSN",
+    "IP_ADDRESS",
+    "PERSON",
+    "LOCATION",
+    "URL",
+    "IBAN_CODE",
+})
+
+
+class PiiRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entities: list[str] = []
+
+    @field_validator("entities")
+    @classmethod
+    def _validate_entities(cls, v: list[str]) -> list[str]:
+        for e in v:
+            if e not in PII_ENTITY_LABELS:
+                raise ValueError(
+                    f"unknown PII entity {e!r}: must be one of {sorted(PII_ENTITY_LABELS)}"
+                )
+        return v
+
+
+class ToolPiiConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    input: dict[str, PiiRule] = {}
+    output: PiiRule | None = None
+
+
+class PiiConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    tools: dict[str, ToolPiiConfig] = {}
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -84,6 +124,7 @@ class Policy(BaseModel):
     allowed_tools: list[str] = []         # flat list (flexible mode)
     allowed_agents: list[str] = []        # flat list (flexible and strict mode)
     graph: Graph | None = None            # strict mode only
+    pii_config: PiiConfig | None = None   # per-tool redaction rules; None = disabled
 
 
 # ---------------------------------------------------------------------------
